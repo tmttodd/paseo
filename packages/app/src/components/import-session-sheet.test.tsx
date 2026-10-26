@@ -350,6 +350,7 @@ function createSnapshotEntry(
     provider,
     status: "ready",
     enabled: true,
+    supportsExactMcpPreapproval: false,
     label: PROVIDER_LABELS[provider] ?? provider,
     ...overrides,
   };

@@ -360,6 +360,9 @@ Paseo gives each plugin installation its own query client.
 
 `usePaseo()` and the handler's `{ paseo }` context expose the same `PaseoApi`: projects,
 workspaces, agents, terminals, providers, and daemon config. They do not expose connection lifecycle.
+`providers.snapshot()` entries carry each provider's `supportsExactMcpPreapproval`, which is what a
+`before("agent.create")` handler gates exact MCP tool preapproval on
+([providers.md](providers.md#provider-native-session-options)).
 
 `usePaseo()` is the plugin's one client: `InstalledPlugin.paseo`, created with the installation in
 `packages/app/src/plugins/registry.ts` over the host's existing connection and passed to setup as

@@ -366,6 +366,7 @@ export const ProviderSnapshotEntrySchema = z.object({
   description: z.string().optional(),
   iconSvg: z.string().optional(),
   defaultModeId: z.string().nullable().optional(),
+  supportsExactMcpPreapproval: z.boolean().optional().default(false),
 });
 
 export const CompactProviderSnapshotModelSchema = AgentModelDefinitionSchema.omit({

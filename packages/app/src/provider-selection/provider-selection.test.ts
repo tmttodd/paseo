@@ -44,6 +44,7 @@ describe("combined model selector data", () => {
       provider: overrides.provider,
       status: overrides.status ?? "ready",
       enabled: overrides.enabled ?? true,
+      supportsExactMcpPreapproval: overrides.supportsExactMcpPreapproval ?? false,
       label: overrides.label ?? overrides.provider,
       description: overrides.description ?? `${overrides.provider} provider`,
       defaultModeId: overrides.defaultModeId ?? "default",

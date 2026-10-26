@@ -161,6 +161,7 @@ function providerSnapshot(
         label: "Mock",
         status,
         enabled: true,
+        supportsExactMcpPreapproval: false,
         fetchedAt: "2026-07-01T00:00:00.000Z",
         models,
         modes: MOCK_MODES,

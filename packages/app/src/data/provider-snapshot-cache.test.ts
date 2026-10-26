@@ -81,6 +81,7 @@ function snapshotEntries(label: string): ProviderSnapshotEntry[] {
       provider: "pi",
       status: "ready",
       enabled: true,
+      supportsExactMcpPreapproval: false,
       models: [
         {
           provider: "pi",
@@ -262,6 +263,7 @@ describe("provider snapshot cache", () => {
         provider: "pi",
         status: "ready",
         enabled: true,
+        supportsExactMcpPreapproval: false,
         models: ["one", "two"].map((id) => ({
           provider: "pi",
           id,

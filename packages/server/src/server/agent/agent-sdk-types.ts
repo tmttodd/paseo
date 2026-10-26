@@ -6,6 +6,7 @@ import type {
   AgentTaskItem,
   JsonValue,
   ProviderOptions,
+  ProviderSnapshotEntry as PublishedProviderSnapshotEntry,
   ToolPolicy,
 } from "@getpaseo/protocol/agent-types";
 import type { AgentMessage } from "@getpaseo/protocol/agent-message";
@@ -124,19 +125,13 @@ export function filterSelectableAgentModels(
   return models?.filter((model) => model.isSelectable !== false) ?? [];
 }
 
-export interface ProviderSnapshotEntry {
-  provider: AgentProvider;
-  status: ProviderStatus;
-  enabled: boolean;
-  source?: "builtin" | "custom";
-  error?: string;
-  models?: AgentModelDefinition[];
+/**
+ * The published snapshot entry plus the daemon-only mode detail. `isUnattended` drives
+ * unattended create-config resolution and never reaches the wire, so the published entry
+ * stays the single definition of everything a client or plugin reads.
+ */
+export interface ProviderSnapshotEntry extends Omit<PublishedProviderSnapshotEntry, "modes"> {
   modes?: AgentMode[];
-  fetchedAt?: string;
-  label?: string;
-  description?: string;
-  iconSvg?: string;
-  defaultModeId?: string | null;
 }
 
 export interface AgentCreateConfigParent {

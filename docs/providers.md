@@ -32,7 +32,10 @@ for native keys and examples.
 
 Exact MCP preapproval is a separate daemon-owned contract. A new provider must fail
 closed for Hub unattended execution until it can approve one exact injected MCP
-server and tool identity without approving native tools.
+server and tool identity without approving native tools. The contract reaches callers as
+`ProviderSnapshotEntry.supportsExactMcpPreapproval`, so a plugin gates on the capability
+instead of naming providers; a provider that extends a capable one inherits it, and a
+daemon too old to publish the field parses as `false`.
 
 ## Core adapter patterns
 

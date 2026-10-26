@@ -78,6 +78,7 @@ function codexEntry(
     provider: "codex",
     status,
     enabled: true,
+    supportsExactMcpPreapproval: true,
     ...(models ? { models } : {}),
   };
 }
@@ -134,7 +135,13 @@ describe("fetchProvidersSnapshot", () => {
     const client = createClient({
       snapshots: [
         providersSnapshot([
-          { provider: "snapshot-icon-provider", status: "ready", enabled: true, iconSvg: svg },
+          {
+            provider: "snapshot-icon-provider",
+            status: "ready",
+            enabled: true,
+            supportsExactMcpPreapproval: false,
+            iconSvg: svg,
+          },
         ]),
       ],
     });

@@ -1235,13 +1235,17 @@ test("provider actions delegate to existing provider RPCs and local snapshot upd
       type: "get_providers_snapshot_response",
       payload: {
         requestId: "providers-snapshot-request",
-        entries: [{ provider: "codex", status: "ready", enabled: true }],
+        entries: [
+          { provider: "codex", status: "ready", enabled: true, supportsExactMcpPreapproval: true },
+        ],
         generatedAt: "2026-05-16T00:00:00.000Z",
       },
     }),
   );
   await expect(snapshotPromise).resolves.toMatchObject({
-    entries: [{ provider: "codex", status: "ready", enabled: true }],
+    entries: [
+      { provider: "codex", status: "ready", enabled: true, supportsExactMcpPreapproval: true },
+    ],
   });
 
   const readyPromise = client.providers.waitForReady({ cwd: "/repo/sdk", timeoutMs: 5_000 });
