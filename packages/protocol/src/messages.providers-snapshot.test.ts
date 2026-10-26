@@ -50,6 +50,29 @@ describe("provider snapshot message schemas", () => {
     expect(parsed.source).toBe("custom");
   });
 
+  test("preserves the exact MCP preapproval capability", () => {
+    const parsed = ProviderSnapshotEntrySchema.parse({
+      provider: "claude",
+      status: "ready",
+      enabled: true,
+      supportsExactMcpPreapproval: true,
+      label: "Claude",
+    });
+
+    expect(parsed.supportsExactMcpPreapproval).toBe(true);
+  });
+
+  test("fails closed when a daemon omits the preapproval capability", () => {
+    const parsed = ProviderSnapshotEntrySchema.parse({
+      provider: "claude",
+      status: "ready",
+      enabled: true,
+      label: "Claude",
+    });
+
+    expect(parsed.supportsExactMcpPreapproval).toBe(false);
+  });
+
   test("defaults missing enabled state in providers snapshot response entries", () => {
     const parsed = GetProvidersSnapshotResponseMessageSchema.parse({
       type: "get_providers_snapshot_response",

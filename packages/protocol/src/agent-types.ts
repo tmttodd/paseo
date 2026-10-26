@@ -127,6 +127,11 @@ export interface ProviderSnapshotEntry {
   description?: string;
   iconSvg?: string;
   defaultModeId?: string | null;
+  /**
+   * The provider accepts exact MCP tool preapproval (`toolPolicy.preapproved`).
+   * Published so a plugin can gate on the capability instead of a provider list.
+   */
+  supportsExactMcpPreapproval: boolean;
 }
 
 export interface AgentFeatureToggle {

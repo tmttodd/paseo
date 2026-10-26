@@ -72,6 +72,7 @@ class FakeProfileHost {
             provider: "claude" as const,
             status: "loading" as const,
             enabled: true,
+            supportsExactMcpPreapproval: true,
           },
         ],
         generatedAt: new Date(0).toISOString(),
@@ -84,6 +85,7 @@ class FakeProfileHost {
           provider: "claude" as const,
           status: "ready" as const,
           enabled: true,
+          supportsExactMcpPreapproval: true,
           label: "Claude Code",
           models: [
             { provider: "claude" as const, id: "opus", label: "Opus" },

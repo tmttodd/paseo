@@ -10,6 +10,7 @@ const CLAUDE: ProviderSnapshotEntry = {
   provider: "claude",
   status: "ready",
   enabled: true,
+  supportsExactMcpPreapproval: true,
   label: "Claude Code",
   defaultModeId: "plan",
   modes: [
@@ -40,6 +41,7 @@ const CODEX: ProviderSnapshotEntry = {
   provider: "codex",
   status: "ready",
   enabled: true,
+  supportsExactMcpPreapproval: true,
   label: "Codex",
   modes: [{ id: "read-only", label: "Read only" }],
   models: [{ provider: "codex", id: "gpt-5.2-codex", label: "GPT-5.2 Codex", isDefault: true }],
@@ -49,6 +51,7 @@ const DISABLED: ProviderSnapshotEntry = {
   provider: "pi",
   status: "ready",
   enabled: false,
+  supportsExactMcpPreapproval: false,
   label: "Pi",
 };
 

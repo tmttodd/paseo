@@ -95,6 +95,7 @@ const entries: ProviderSnapshotEntry[] = [
     provider: "test-provider",
     status: "ready",
     enabled: true,
+    supportsExactMcpPreapproval: false,
     iconSvg: '<svg xmlns="http://www.w3.org/2000/svg"/>',
     models: [
       { provider: "test-provider", id: "test-model", label: "Test model", thinkingOptions: [] },

@@ -382,6 +382,31 @@ describe("ProviderSnapshotManager public surface", () => {
     }
   });
 
+  test("publishes the exact MCP preapproval capability for every provider", () => {
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        "zai-claude": { extends: "claude", label: "ZAI", enabled: true },
+      },
+    });
+    try {
+      const entries = manager.getSnapshot("/tmp/project").records.map(({ entry }) => entry);
+      const capability = new Map(
+        entries.map((entry) => [entry.provider, entry.supportsExactMcpPreapproval]),
+      );
+
+      expect(capability.get("claude")).toBe(true);
+      expect(capability.get("codex")).toBe(true);
+      expect(capability.get("opencode")).toBe(true);
+      expect(capability.get("omp")).toBe(false);
+      expect(capability.get("copilot")).toBe(false);
+      // A provider that extends a capable one inherits the contract.
+      expect(capability.get("zai-claude")).toBe(true);
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("providerOverrides with enabled:false marks the provider as unavailable without probing", async () => {
     const isAvailable = vi.fn(async () => true);
     const fetchCatalog = vi.fn(async () => ({
@@ -3500,6 +3525,22 @@ describe("plugin provider overrides and launch", () => {
     };
     return { registration, launches };
   }
+
+  test("publishes plugin-defined providers as exact MCP preapproval capable", async () => {
+    const { registration } = provider();
+    const manager = new ProviderSnapshotManager({ logger: createTestLogger() });
+    try {
+      manager.replacePluginProviders([registration]);
+      const entry = manager
+        .getSnapshot("/tmp/project")
+        .records.map((record) => record.entry)
+        .find((candidate) => candidate.provider === registration.id);
+      expect(entry?.supportsExactMcpPreapproval).toBe(true);
+    } finally {
+      await manager.shutdown();
+      manager.destroy();
+    }
+  });
 
   test("reports plugin status diagnostics without connecting", async () => {
     const { registration, launches } = provider();

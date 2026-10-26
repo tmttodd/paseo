@@ -192,7 +192,15 @@ function providerUpdate(generatedAt: string): ProvidersSnapshotUpdateMessage {
   return {
     type: "providers_snapshot_update",
     payload: {
-      entries: [{ provider: "codex", status: "ready", enabled: true, models: [] }],
+      entries: [
+        {
+          provider: "codex",
+          status: "ready",
+          enabled: true,
+          supportsExactMcpPreapproval: true,
+          models: [],
+        },
+      ],
       generatedAt,
     },
   };
@@ -360,7 +368,15 @@ describe("server data push router", () => {
     await expect
       .poll(() => queryClient.getQueryData(providersSnapshotQueryKey(serverId)))
       .toEqual({
-        entries: [{ provider: "codex", status: "ready", enabled: true, models: [] }],
+        entries: [
+          {
+            provider: "codex",
+            status: "ready",
+            enabled: true,
+            supportsExactMcpPreapproval: true,
+            models: [],
+          },
+        ],
         generatedAt: "2026-01-01T00:00:00.000Z",
         requestId: "providers_snapshot_update",
       });
@@ -373,7 +389,15 @@ describe("server data push router", () => {
     await expect
       .poll(() => queryClient.getQueryData(providersSnapshotQueryKey(serverId)))
       .toEqual({
-        entries: [{ provider: "codex", status: "ready", enabled: true, models: [] }],
+        entries: [
+          {
+            provider: "codex",
+            status: "ready",
+            enabled: true,
+            supportsExactMcpPreapproval: true,
+            models: [],
+          },
+        ],
         generatedAt: "2026-01-01T00:00:00.000Z",
         requestId: "providers_snapshot_update",
       });

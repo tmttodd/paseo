@@ -18,6 +18,7 @@ function providerEntry(): ProviderSnapshotEntry {
     provider: "pi",
     status: "ready",
     enabled: true,
+    supportsExactMcpPreapproval: false,
     iconSvg: '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z" /></svg>',
     models: [
       {
@@ -69,6 +70,7 @@ describe("provider snapshot codec", () => {
         provider: "pi",
         status: "ready",
         enabled: true,
+        supportsExactMcpPreapproval: false,
         models: Array.from({ length: 200 }, (_, index) => ({
           ...model,
           id: `openai/model-${index}`,
