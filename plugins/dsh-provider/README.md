@@ -30,10 +30,14 @@ Pass these in `providerOptions` (per agent) or under `agents.providers.dsh.optio
 | `patch`          | `string`   | —          | Extra patch-list overlay, applied before the provider's own overlay. |
 | `disablePlugins` | `string[]` | `[]`       | Profile plugin row ids to disable for this session.                  |
 
-`disablePlugins` exists because a broken profile plugin otherwise fails every turn. On this
-machine `tokenomics` dies with `RangeError: Invalid string length` while decompressing a
-large session log, so `{"disablePlugins": ["tokenomics"]}` is the documented workaround until
-that plugin streams instead of buffering.
+`disablePlugins` exists because a profile plugin that throws takes the whole boot down
+before the model is called. A plugin that is already broken at boot cannot be fixed by the
+provider, so this is the escape hatch: `{"disablePlugins": ["some-plugin"]}` writes one
+overlay row per id for that session only.
+
+It was used in anger on 2026-10-26 for `dsh-tokenomics`, which buffered a whole
+decompressed session log in one string and died with `RangeError: Invalid string length`.
+That plugin has since been removed from the profiles, so nothing needs disabling today.
 
 Model and thinking effort are written into the provider's own overlay as an
 `agent-default-model` row, so a model change applies from the next turn.

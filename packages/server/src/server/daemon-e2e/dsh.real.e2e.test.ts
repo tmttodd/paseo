@@ -8,15 +8,6 @@ import { BuiltinPluginLoader } from "../plugins/builtin/index.js";
 import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
 import { DaemonClient } from "../test-utils/daemon-client.js";
 
-/**
- * The user's `headless` profile loads a `dsh-tokenomics` plugin that buffers a
- * whole decompressed session log in one string and dies with
- * `RangeError: Invalid string length`, which kills every turn. The provider's
- * `disablePlugins` option exists for exactly this: it writes one patch overlay
- * that disables the named profile rows for this session only.
- */
-const disableBrokenProfilePlugins = { disablePlugins: ["tokenomics"] };
-
 test("DSH registers as a provider without a client settings bundle", async () => {
   const daemon = await createTestPaseoDaemon({
     builtinPlugins: new BuiltinPluginLoader(undefined, ["dsh-provider"]),
@@ -72,7 +63,6 @@ test("DSH creates an agent, streams a reply, runs a real tool, and resumes", asy
     const agent = await client.createAgent({
       provider: "dsh",
       cwd,
-      providerOptions: disableBrokenProfilePlugins,
     });
     await client.sendMessage(agent.id, "Reply exactly DSH_TEXT_E2E_OK. Do not use tools.");
     expect((await client.waitForFinish(agent.id, 180000)).status).toBe("idle");

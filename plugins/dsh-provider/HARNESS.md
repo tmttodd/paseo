@@ -225,21 +225,31 @@ dsh --profile headless --patch overlay.yml --json "task"
 
 `launcherArgs()` in `test/dsh-runtime.mjs` exists so no caller can get this wrong.
 
-### 2. The `tokenomics` plugin kills the headless boot
+### 2. A profile plugin can kill the headless boot
 
-Without disabling it, a headless turn dies before the model is called:
+A plugin that throws inside its own stream handler takes the whole boot down before
+the model is called. Observed on 2026-10-26 with `dsh-tokenomics`, which buffered a
+whole decompressed session log in one string:
 
 ```
 dsh: fatal uncaught exception: RangeError: Invalid string length
     at Socket.<anonymous> (…/dsh-tokenomics/index.js:472:53)
 ```
 
-The stream stops after `session` / `turn_start` / `step_start` and a `final` with
-empty text, exit 1. The harness overlay disables `tokenomics`,
-`dsh-onepassword-tools`, `dsh-pr-claim-gate`, `ponytail`, and `guardrails`; `tokenomics`
-is the one that matters. `live.mjs` and `capture.mjs` write that overlay into a temp
-dir and pass it with `--patch`. If a future profile change makes the overlay
-unnecessary, the harness still works — it only disables plugins.
+The stream stopped after `session` / `turn_start` / `step_start` and a `final` with
+empty text, exit 1 — with no `turn_end`, so the provider reports a failed turn.
+
+`tokenomics` was removed from the `headless` and `desktop` profiles on 2026-10-26
+(`dsh plugin --profile <p> remove @local/dsh-tokenomics`, plus the
+`dsh.profile.bundles` entry), so a headless turn now runs with no overlay at all.
+The harness overlay still disables `dsh-onepassword-tools`, `dsh-pr-claim-gate`,
+`ponytail`, and `guardrails`: those inject prompt text, gate tool calls, or add
+their own tools, and the contract checks are about `dsh` itself, not them.
+`live.mjs` and `capture.mjs` write that overlay into a temp dir and pass it with
+`--patch`.
+
+If a future profile change reintroduces a crashing plugin, the fix is the same:
+disable it in the profile, or pass `providerOptions.disablePlugins` for one session.
 
 Other profiles carry their own hazards; the harness always passes an explicit
 `--profile` rather than relying on the user's default.
