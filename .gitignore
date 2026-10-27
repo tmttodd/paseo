@@ -98,3 +98,4 @@ app.json
 
 # Project-local Serena configuration and memories.
 .serena/
+plugins/dsh-provider/test/loop-runs/

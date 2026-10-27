@@ -1,0 +1,8 @@
+{"type":"session","sessionId":"session-fake-simple-0001","cwd":"$CWD"}
+{"type":"status","phase":"turn_start","turn":1}
+{"type":"status","phase":"step_start","turn":1,"step":1}
+{"type":"thinking","text":"The user asks for a greeting. No tools needed."}
+{"type":"text","text":"Hello from DSH."}
+{"type":"status","phase":"step_end","turn":1,"step":1,"usage":{"inputTokens":13870,"outputTokens":30,"totalTokens":13900}}
+{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}
+{"type":"final","text":"Hello from DSH."}

@@ -1,0 +1,4 @@
+{"type":"session","sessionId":"session-fake-empty-final-0001","cwd":"$CWD"}
+{"type":"status","phase":"turn_start","turn":1}
+{"type":"status","phase":"step_start","turn":1,"step":1}
+{"type":"final","text":""}

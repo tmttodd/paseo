@@ -6,8 +6,9 @@ server integrations.
 ## Plugin providers
 
 Keep a bundled provider in `plugins/<id>/` and register it through
-`@getpaseo/plugin/server/provider`. Antigravity and Muse Code follow this pattern. Built-in loading and SDK
-import rules belong to [plugins.md](plugins.md#built-in-plugins); the
+`@getpaseo/plugin/server/provider`. Antigravity, Muse Code, and DSH follow this
+pattern. Built-in loading and SDK import rules belong to
+[plugins.md](plugins.md#built-in-plugins); the
 [public provider guide](../public-docs/plugins/providers.md) covers the provider contract.
 
 The plugin owns the CLI transport, session state, catalog, and capabilities. Launch CLI transports
@@ -21,6 +22,7 @@ provider icon map. You do not need a core manifest entry or provider factory.
 | ----------- | ------------------------------------------ | ---------------------------------------------------------------- |
 | Antigravity | Installed `agy` CLI                        | [Antigravity](../public-docs/supported-providers.md#antigravity) |
 | Muse Code   | MSP over one `muse serve` host per session | [Muse Code](../public-docs/muse-code.md)                         |
+| DSH         | One `dsh --json` child process per turn    | [DSH provider](../plugins/dsh-provider/README.md)                |
 
 ## Provider-native session options
 

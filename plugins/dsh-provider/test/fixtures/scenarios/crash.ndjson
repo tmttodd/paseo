@@ -1,0 +1,5 @@
+{"type":"session","sessionId":"session-fake-crash-0001","cwd":"$CWD"}
+{"type":"status","phase":"turn_start","turn":1}
+{"type":"status","phase":"step_start","turn":1,"step":1}
+{"type":"thinking","text":"Writing the long answer now."}
+{"type":"text","text":"Partial output before the crash"}

@@ -1,0 +1,8 @@
+{"type":"session","sessionId":"session-f3b2fe38-a84b-4689-bd36-f583c41aa938","cwd":"/private/var/folders/nd/5gyjpvq95817y483t7654sq80000gn/T/dsh-capture-XqBp4r"}
+{"type":"status","phase":"turn_start","turn":1}
+{"type":"status","phase":"step_start","turn":1,"step":1}
+{"type":"thinking","text":"The user wants me to reply with exactly \"dsh-capture-simple\". This is a simple direct request. No tool calls needed. Just reply exactly."}
+{"type":"text","text":"dsh-capture-simple"}
+{"type":"status","phase":"step_end","turn":1,"step":1,"usage":{"inputTokens":2156,"outputTokens":40,"totalTokens":13972,"cacheReadTokens":11776}}
+{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}
+{"type":"final","text":"dsh-capture-simple"}

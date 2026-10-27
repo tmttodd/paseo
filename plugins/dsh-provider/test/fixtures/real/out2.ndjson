@@ -1,0 +1,8 @@
+{"type":"session","sessionId":"session-0ce7d7da-4614-4cf0-8abb-5021da35c917","cwd":"/private/tmp/dsh-probe"}
+{"type":"status","phase":"turn_start","turn":1}
+{"type":"status","phase":"step_start","turn":1,"step":1}
+{"type":"thinking","text":"The user asks: \"Reply with exactly: pong\". So I should reply with exactly \"pong\". No tools needed."}
+{"type":"text","text":"pong"}
+{"type":"status","phase":"step_end","turn":1,"step":1,"usage":{"inputTokens":13870,"outputTokens":30,"totalTokens":13900}}
+{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}
+{"type":"final","text":"pong"}

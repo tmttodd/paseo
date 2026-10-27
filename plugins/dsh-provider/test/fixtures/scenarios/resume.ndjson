@@ -1,0 +1,8 @@
+{"type":"session","sessionId":"$SESSION_ID","cwd":"$CWD"}
+{"type":"status","phase":"turn_start","turn":2}
+{"type":"status","phase":"step_start","turn":2,"step":1}
+{"type":"thinking","text":"The user asks what exact shell command I ran in the previous turn, verbatim. It was `echo dsh-harness-probe`."}
+{"type":"text","text":"The exact command was: echo dsh-harness-probe"}
+{"type":"status","phase":"step_end","turn":2,"step":1,"usage":{"inputTokens":276,"outputTokens":92,"totalTokens":14192,"cacheReadTokens":13824}}
+{"type":"status","phase":"turn_end","turn":2,"reason":{"kind":"completed"}}
+{"type":"final","text":"The exact command was: echo dsh-harness-probe"}

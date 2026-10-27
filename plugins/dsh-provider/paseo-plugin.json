@@ -1,0 +1,1 @@
+{ "id": "dsh-provider", "requirements": { "paseo": ">=0.10.0" } }

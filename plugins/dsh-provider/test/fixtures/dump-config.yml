@@ -1,0 +1,81 @@
+# Trimmed excerpt of `dsh --profile headless --dump-config` (dsh 0.2.1-rc.3).
+# The real output is 6155 lines; only the rows the provider reads are kept, in their
+# original order and indentation. Row ordering is deliberate: `agent-default-model`
+# precedes `llm-pi-ai`, and unrelated rows surround both, so a parser cannot succeed
+# by taking the first row.
+#
+# Fidelity note: the `deepseek:` provider under `llm-pi-ai` is SYNTHETIC — the real
+# headless dump only carries `homelab`. It is kept as a second provider so the catalog
+# parser is exercised against a provider whose models declare no `reasoningEfforts`.
+# Everything else here is verbatim, including the `!!js` rows.
+- id: agent
+  name: "@deepseek-ai/dsh-agent"
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: homelab
+    model: deepseek-v4.1-flash
+    reasoningEffort: max
+- id: settings
+  name: "@deepseek-ai/dsh-settings"
+  disabled: !!js "!ctx.get('profileContext')"
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      homelab:
+        displayName: Homelab AI Gateway
+        api: openai-completions
+        baseURL: http://192.168.20.240/v1
+        compat:
+          supportsDeveloperRole: false
+          maxTokensField: max_tokens
+        defaultContextWindow: 262144
+        defaultMaxTokens: 32768
+        models:
+          - id: deepseek-v4.1-flash
+            name: DeepSeek-V4.1-Flash 1017
+            input:
+              - text
+              - image
+            contextWindow: 1048576
+            maxTokens: 65536
+            reasoningEfforts:
+              "off": none
+              low: low
+              high: high
+              xhigh: xhigh
+              max: max
+          - id: nemotron-3.5-super-vl
+            name: Nemotron-3.5-Super-VL 120B-A12B NVFP4 (reason/ops tier, dp02 TP2)
+            input:
+              - text
+              - image
+            contextWindow: 1048576
+            maxTokens: 65536
+            reasoningEfforts:
+              minimal: minimal
+              low: low
+              medium: medium
+              high: high
+              xhigh: xhigh
+              max: max
+      deepseek:
+        displayName: DeepSeek
+        api: openai-completions
+        baseURL: https://api.deepseek.com/v1
+        defaultContextWindow: 131072
+        defaultMaxTokens: 8192
+        models:
+          - id: deepseek-chat
+            name: DeepSeek Chat
+            input:
+              - text
+            contextWindow: 131072
+            maxTokens: 8192
+- id: session-persistence-jsonl
+  name: "@deepseek-ai/dsh-session-persistence-jsonl"
+  config:
+    root: !!js dshHomePath('sessions')
+- id: working-directory
+  name: "@deepseek-ai/dsh-working-directory"

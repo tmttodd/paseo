@@ -1,0 +1,5 @@
+#stderr dsh: warning: 32 entries did not activate
+#stderr preset-specialist-advisor (@deepseek-ai/dsh-agent-preset): pending (waiting for service: agentPresets)
+#stderr preset-specialist-code-reviewer (@deepseek-ai/dsh-agent-preset): pending (waiting for service: agentPresets)
+#stderr dsh: fatal uncaught exception: RangeError: Invalid string length
+{"type":"final","text":""}

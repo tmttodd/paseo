@@ -1,0 +1,4 @@
+{"type":"session","sessionId":"session-93d2f382-4d61-4146-a162-1838d50fded6","cwd":"/private/tmp/dsh-probe"}
+{"type":"status","phase":"turn_start","turn":1}
+{"type":"status","phase":"step_start","turn":1,"step":1}
+{"type":"final","text":""}
