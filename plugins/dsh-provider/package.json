@@ -1,0 +1,18 @@
+{
+  "name": "dsh-provider",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DeepSeek Harness (dsh) provider for Paseo",
+  "files": [
+    "paseo-plugin.json",
+    "README.md",
+    "HARNESS.md",
+    "icon.svg",
+    "index.server.ts",
+    "server/"
+  ],
+  "devDependencies": {
+    "@getpaseo/plugin": "0.13.0",
+    "zod": "^4.4.3"
+  }
+}

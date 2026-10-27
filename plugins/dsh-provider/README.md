@@ -1,7 +1,21 @@
 # DSH provider
 
-Bundled Paseo provider for [DSH](https://deepseek.com) — the DeepSeek Harness CLI (`dsh`).
+Paseo provider for [DSH](https://deepseek.com) — the DeepSeek Harness CLI (`dsh`).
 Provider ID `dsh`; plugin ID `dsh-provider`.
+
+It ships as a bundled built-in, so a Paseo built from this repository has it with no setup.
+A **packaged** Paseo (`/Applications/Paseo.app`) carries its own copy of the built-ins and
+cannot see a checkout, so install the directory instead:
+
+```bash
+paseo plugin add /path/to/paseo/plugins/dsh-provider
+paseo plugin ls dsh-provider          # status must read "running"
+paseo run --provider dsh "Reply with exactly: ok"
+```
+
+The plugin declares no dependencies: it imports only `@getpaseo/plugin/*`, `zod`, and Node
+built-ins, which the daemon provides. Re-point the install at a permanent checkout before
+deleting the one you installed from.
 
 ## How it runs a session
 
