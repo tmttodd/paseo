@@ -36,6 +36,28 @@ Verified live: roster listing, pre-first-turn switch to `ptc`, `plan_mode`
 true/false around `/plan`, and the post-turn refusal — 6 live checks green, 10
 unit tests green.
 
+### v4 — host questions and the permission preset (2026-10-28)
+
+DSH asks the user through a `$events` waterfall (`user-questions/request`; the answer is a
+`$events/result` with `{answers:[{id, selected, custom?}]}`), and it carries the session's
+permission preset in the `permissions` projection, changed only by `/permission <preset>`.
+Paseo already renders `session.permission` cards (PlanCard, QuestionFormCard), so the provider
+now:
+
+- opens `$events` (the browser-cookie Peer has `interactions: answer`) and maps
+  `ask_user_question` to a `kind:"question"` card and `exit_plan_mode` to a `kind:"plan"` card
+  with `metadata.planText` and Implement/Keep-planning actions;
+- answers a question card by mapping the form's `answers` record back to DSH's per-question ids
+  (option labels matched exactly; anything else becomes `custom`), and the plan card by
+  answering `Approve` / `Keep planning`;
+- exposes the permission preset as a `permission_preset` select setting, sourced from
+  `permissionPresets/catalog` and the `permissions` projection, switched through the host's own
+  `/permission` command.
+
+Verified live: the permission preset select appears with read-only/workspace-write/
+danger-full-access and reads `workspace-write`; 14 unit tests cover the question card, the plan
+card, the answer mapping and the preset switch.
+
 ### v3 — images (2026-10-28)
 
 A separate agent's probe proved the model behind `homelab/deepseek-v4.1-flash`

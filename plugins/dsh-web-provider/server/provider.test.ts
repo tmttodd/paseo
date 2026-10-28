@@ -137,6 +137,15 @@ async function harness() {
   return { connection, events, wait, send, request, open, prompt, command, cwd };
 }
 
+/** A config event whose permission preset reads `value`. */
+function permissionPreset(value: string) {
+  return (event: ProviderEvent): boolean =>
+    event.type === "session.config" &&
+    event.config.settings.some(
+      (setting) => setting.id === "permission_preset" && setting.value === value,
+    );
+}
+
 /** A config event whose plan-mode toggle reads `value`. */
 function planToggle(value: boolean) {
   return (event: ProviderEvent): boolean =>
@@ -226,9 +235,19 @@ describe("dsh-web provider", () => {
       "Minimal",
       "Ops",
     ]);
-    // Plan is a toggle, not a mode, so both can coexist.
+    // Plan is a toggle and the permission preset is a select, so both coexist.
     expect(config.config.settings).toEqual([
       expect.objectContaining({ id: "plan_mode", type: "toggle", value: false }),
+      expect.objectContaining({
+        id: "permission_preset",
+        type: "select",
+        value: "workspace-write",
+        options: [
+          { label: "Read Only", value: "read-only" },
+          { label: "Workspace Write", value: "workspace-write" },
+          { label: "Full access", value: "danger-full-access" },
+        ],
+      }),
     ]);
   });
 
@@ -350,6 +369,79 @@ describe("dsh-web provider", () => {
     );
     if (config?.type !== "session.config") throw new Error("config missing");
     expect(config.config.mode).toBe("minimal");
+  });
+
+  it("changes the permission preset through the host's own command", async () => {
+    const { open, events, request, wait } = await harness();
+    await open();
+    await request({
+      type: "session.configure",
+      requestId: "permission-1",
+      sessionId: "s",
+      changes: { settings: { permission_preset: "read-only" } },
+    });
+    await wait(permissionPreset("read-only"));
+    const latest = events.findLast((event) => event.type === "session.config");
+    if (latest?.type !== "session.config") throw new Error("config missing");
+    expect(latest.config.settings).toContainEqual(
+      expect.objectContaining({ id: "permission_preset", value: "read-only" }),
+    );
+  });
+
+  it("surfaces a host question as a question card and answers it", async () => {
+    const { open, prompt, wait, request } = await harness();
+    await open();
+    await prompt("please ask-question");
+    const ask = await wait(
+      (event) => event.type === "session.permission" && event.request.kind === "question",
+    );
+    if (ask.type !== "session.permission") throw new Error("permission missing");
+    expect(ask.request.input).toEqual({
+      questions: [
+        {
+          question: "Which option?",
+          header: "Choice",
+          options: [{ label: "A" }, { label: "B" }],
+          multiSelect: false,
+          allowOther: true,
+        },
+      ],
+    });
+    await request({
+      type: "session.permission",
+      sessionId: "s",
+      permissionId: ask.request.id,
+      response: {
+        behavior: "allow",
+        updatedInput: { answers: { Choice: "B" } },
+      },
+    });
+    await wait(
+      (event) =>
+        event.type === "session.permission_resolved" && event.permissionId === ask.request.id,
+    );
+  });
+
+  it("surfaces a plan review as a plan card and approves it", async () => {
+    const { open, prompt, wait, request } = await harness();
+    await open();
+    await prompt("please exit-plan");
+    const ask = await wait(
+      (event) => event.type === "session.permission" && event.request.kind === "plan",
+    );
+    if (ask.type !== "session.permission") throw new Error("permission missing");
+    expect(ask.request.metadata).toEqual({ planText: "# Plan\nDo the thing." });
+    expect(ask.request.actions?.map((action) => action.id)).toEqual(["implement", "dismiss"]);
+    await request({
+      type: "session.permission",
+      sessionId: "s",
+      permissionId: ask.request.id,
+      response: { behavior: "allow", selectedActionId: "implement" },
+    });
+    await wait(
+      (event) =>
+        event.type === "session.permission_resolved" && event.permissionId === ask.request.id,
+    );
   });
 
   it("runs /goal through the host and surfaces the goal", async () => {

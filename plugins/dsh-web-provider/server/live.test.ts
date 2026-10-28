@@ -126,6 +126,16 @@ live("dsh-web live", () => {
       expect(modes.length).toBeGreaterThan(0);
       expect(modes.map((mode) => mode.id)).toContain("standard");
       expect(config.config.settings.some((setting) => setting.id === "plan_mode")).toBe(true);
+      const permission = config.config.settings.find(
+        (setting) => setting.id === "permission_preset",
+      );
+      expect(permission?.type).toBe("select");
+      if (permission?.type === "select") {
+        expect(permission.options.map((option) => option.value)).toEqual(
+          expect.arrayContaining(["read-only", "workspace-write", "danger-full-access"]),
+        );
+        console.log(`PASS check=permission-preset :: ${permission.value ?? "unset"}`);
+      }
       const creator = modes.find((mode) => mode.id === "cordis");
       if (creator !== undefined) expect(creator.label).toBe("Creator");
       console.log(

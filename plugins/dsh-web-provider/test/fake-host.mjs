@@ -14,6 +14,7 @@ import { createServer } from "node:http";
 
 const TOKEN = "fake-token";
 const COOKIE = "dsh-auth-fake=1";
+const eventStreams = new Set();
 
 const argv = process.argv.slice(2);
 const portFlag = argv.indexOf("--port");
@@ -25,7 +26,13 @@ const sessions = new Map();
 function sessionOf(id) {
   let session = sessions.get(id);
   if (session === undefined) {
-    session = { follows: new Set(), planActive: false, turn: 0, preset: "standard" };
+    session = {
+      follows: new Set(),
+      planActive: false,
+      turn: 0,
+      preset: "standard",
+      permission: "workspace-write",
+    };
     sessions.set(id, session);
   }
   return session;
@@ -53,6 +60,18 @@ function sendEvent(stream, event) {
   send(stream, { type: "event", event: { ...event, seq: stream.nextSeq++, time: Date.now() } });
 }
 
+function broadcastWaterfall(session, eventId, request) {
+  for (const stream of eventStreams) {
+    send(stream, {
+      type: "waterfall",
+      event: "user-questions/request",
+      eventId,
+      agentId: session.id ?? "session-fake-1",
+      request,
+    });
+  }
+}
+
 function broadcast(session, event) {
   for (const stream of session.follows) sendEvent(stream, event);
 }
@@ -65,6 +84,7 @@ function projections(session) {
       agentPreset: session.preset,
       sessionListMetadata: { blank: session.turn === 0, lastPromptAt: null },
       plan: { active: session.planActive, pending: false },
+      permissions: { currentValue: session.permission },
       modelSelection: {
         lastUsed: { provider: "fake-provider", model: "fake-model" },
         next: { provider: "fake-provider", model: "fake-model" },
@@ -164,6 +184,20 @@ function dispatchCommand(method, request, res, rpcId) {
     runPlan(session, rest, res, rpcId);
     return;
   }
+  if (name === "permission") {
+    session.permission = rest === "" ? session.permission : rest;
+    for (const follow of session.follows) {
+      send(follow, {
+        type: "projection",
+        sessionId: request.agentId,
+        key: "permissions",
+        value: { currentValue: session.permission },
+        seq: 0,
+      });
+    }
+    ok(res, rpcId, { commandId: "permission", result: undefined });
+    return;
+  }
   if (name === "goal") {
     runGoal(session, rest, res, rpcId);
     return;
@@ -209,6 +243,20 @@ function dispatchSession(method, request, res, rpcId) {
       ok(res, rpcId, { sessionId, agentPreset: session.preset });
       return;
     }
+    case "permissionPresets/catalog":
+      ok(res, rpcId, {
+        options: [
+          { value: "read-only", name: "Read Only" },
+          { value: "workspace-write", name: "Workspace Write" },
+          { value: "danger-full-access", name: "Full access" },
+        ],
+        defaultOptions: [],
+        defaultPreset: "danger-full-access",
+      });
+      return;
+    case "$events/result":
+      acceptWaterfallAnswer(request, res, rpcId);
+      return;
     case "agentPresets/list":
       ok(res, rpcId, { presets: PRESETS });
       return;
@@ -257,6 +305,22 @@ function dispatchSession(method, request, res, rpcId) {
   }
 }
 
+function acceptWaterfallAnswer(request, res, rpcId) {
+  const args = request.args ?? {};
+  const answers = args?.outcome?.value?.answers;
+  const valid =
+    args?.outcome?.kind === "result" &&
+    Array.isArray(answers) &&
+    answers.length > 0 &&
+    typeof answers[0]?.id === "string" &&
+    Array.isArray(answers[0]?.selected);
+  if (!valid) {
+    fail(res, rpcId, "BAD_ANSWER", "waterfall answer is malformed");
+    return;
+  }
+  ok(res, rpcId, true);
+}
+
 function acceptPrompt(request, res, rpcId) {
   const session = sessionOf(request.sessionId);
   const text = (request.content ?? [])
@@ -269,6 +333,34 @@ function acceptPrompt(request, res, rpcId) {
   // so the suite pins the admission race.
   broadcast(session, { type: "turn/start", data: { turn } });
   ok(res, rpcId, { accepted: true });
+  // The host asks the user a question mid-turn (ask_user_question / exit_plan_mode).
+  console.error("[fake] prompt text:", JSON.stringify(text));
+  if (text.includes("ask-question")) {
+    broadcastWaterfall(session, "evt-question", {
+      questions: [
+        {
+          id: "q1",
+          question: "Which option?",
+          header: "Choice",
+          options: [{ label: "A" }, { label: "B" }],
+        },
+      ],
+      wait: { callId: "call-1" },
+    });
+  }
+  if (text.includes("exit-plan")) {
+    broadcastWaterfall(session, "evt-plan", {
+      questions: [
+        {
+          id: "plan-review",
+          question: "Approve this plan?",
+          detail: "# Plan\nDo the thing.",
+          options: [{ label: "Approve" }, { label: "Keep planning" }],
+        },
+      ],
+      wait: { callId: "call-2" },
+    });
+  }
   // A prompt mentioning "long" keeps its turn open so the suite can interrupt it.
   const slow = text.includes("long");
   setTimeout(() => {
@@ -399,6 +491,7 @@ server.on("upgrade", (req, socket) => {
     for (const stream of streams.values()) {
       stream.closed = true;
       sessions.get(stream.sessionId)?.follows.delete(stream);
+      eventStreams.delete(stream);
     }
     streams.clear();
   });
@@ -413,6 +506,11 @@ server.on("upgrade", (req, socket) => {
         write: (value) => write(value),
       };
       streams.set(frame.streamId, stream);
+      if (frame.endpoint === "$events") {
+        eventStreams.add(stream);
+        send(stream, { type: "ready", clientId: "fake-client", host: { home: "/tmp" } });
+        return;
+      }
       if (frame.endpoint === "session/follow") {
         const session = sessionOf(stream.sessionId);
         session.follows.add(stream);

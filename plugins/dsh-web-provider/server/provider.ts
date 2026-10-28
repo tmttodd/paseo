@@ -14,6 +14,7 @@ import {
   type ProviderRegistration,
   type ProviderSessionConfig,
 } from "@getpaseo/plugin/server/provider";
+import type { Json } from "./internal/timeline.js";
 import {
   catalogFromHost,
   modesFromPresets,
@@ -23,7 +24,7 @@ import {
 } from "./internal/catalog.js";
 import { DshHost } from "./internal/host.js";
 import { Session } from "./internal/session.js";
-import { DshError, type DshWire } from "./internal/wire.js";
+import { DshError, type DshResult, type DshWire, type StreamHandle } from "./internal/wire.js";
 
 /**
  * DSH's native provider: one owned `dsh web` host, driven over the same wire the
@@ -35,6 +36,9 @@ const CAPABILITIES = [
   "prompt.message",
   "prompt.command",
   "prompt.steer",
+  // Host questions (ask_user_question, exit_plan_mode) surface as permission
+  // cards, so the daemon may send the answer back.
+  "permission",
   // The host's prompt accepts image content parts and its own limit report
   // governs them; `encodeContent` maps Paseo images to DSH image blocks.
   "prompt.image",
@@ -120,6 +124,10 @@ function createConnection(
   let patchDirectory: string | undefined;
   let catalog: CatalogValue | null = null;
   let pending = Promise.resolve();
+  let eventsStream: StreamHandle | undefined;
+  let eventsClientId: string | undefined;
+  let eventsBlocked = false;
+  const eventSessions = new Map<string, Session>();
 
   function emit(event: ProviderEvent): void {
     if (closed) return;
@@ -177,6 +185,7 @@ function createConnection(
     }
     host = started;
     hostProfile = profile;
+    openEvents(started);
     started.onExit(() => {
       if (host !== started) return;
       host = undefined;
@@ -187,6 +196,102 @@ function createConnection(
       sessions.clear();
     });
     return started;
+  }
+
+  /** The host's human-interaction channel: questions, plan review, approvals. */
+  function openEvents(target: DshHost): void {
+    if (closed || eventsBlocked || eventsStream !== undefined) return;
+    eventsClientId = undefined;
+    eventsStream = target.wire.open(
+      "$events",
+      { args: {} },
+      {
+        item: (value) => acceptEventFrame(value),
+        end: () => {
+          eventsStream = undefined;
+          reopenEventsWhenConnected(target);
+        },
+        error: (error) => {
+          eventsStream = undefined;
+          // A peer without the answer interaction can never use this stream; a
+          // reopen would just loop. The provider degrades to notices-only.
+          if (error.code === "gateway/interactions-forbidden") {
+            eventsBlocked = true;
+            return;
+          }
+          reopenEventsWhenConnected(target);
+        },
+      },
+    );
+  }
+
+  function reopenEventsWhenConnected(target: DshHost): void {
+    if (closed) return;
+    const stop = target.wire.onConnection((state) => {
+      if (!state.connected) return;
+      stop();
+      openEvents(target);
+    });
+    if (target.wire.connection.connected) {
+      stop();
+      setTimeout(() => openEvents(target), 250).unref?.();
+    }
+  }
+
+  function acceptEventFrame(value: unknown): void {
+    if (typeof value !== "object" || value === null) return;
+    const frame = value as {
+      type?: unknown;
+      clientId?: unknown;
+      event?: unknown;
+      eventId?: unknown;
+      agentId?: unknown;
+      request?: unknown;
+    };
+    if (frame.type === "ready") {
+      if (typeof frame.clientId === "string") eventsClientId = frame.clientId;
+      return;
+    }
+    if (frame.type === "waterfall") {
+      const eventId = typeof frame.eventId === "string" ? frame.eventId : undefined;
+      const agentId = typeof frame.agentId === "string" ? frame.agentId : undefined;
+      const event = typeof frame.event === "string" ? frame.event : undefined;
+      if (eventId === undefined || agentId === undefined || event === undefined) return;
+      const session = [...sessions.values()].find((entry) => entry.dshSessionId === agentId);
+      if (session === undefined) return;
+      eventSessions.set(eventId, session);
+      session.acceptWaterfall(event, eventId, (frame.request ?? {}) as Record<string, unknown>);
+      return;
+    }
+    if (frame.type === "cancel") {
+      const eventId = typeof frame.eventId === "string" ? frame.eventId : undefined;
+      if (eventId === undefined) return;
+      eventSessions.get(eventId)?.onWaterfallCancel(eventId);
+      eventSessions.delete(eventId);
+    }
+  }
+
+  async function answerWaterfall(eventId: string, outcome: Json): Promise<DshResult> {
+    if (host === undefined) {
+      return {
+        ok: false,
+        error: { code: "HOST_GONE", message: "The dsh web host is not running", details: {} },
+      };
+    }
+    if (eventsClientId === undefined) {
+      return {
+        ok: false,
+        error: {
+          code: "EVENTS_NOT_READY",
+          message: "The dsh event stream has not delivered its client id",
+          details: {},
+        },
+      };
+    }
+    eventSessions.delete(eventId);
+    return host.wire.call("$events/result", {
+      args: { clientId: eventsClientId, eventId, outcome },
+    });
   }
 
   async function loadCatalog(target: DshHost): Promise<CatalogValue | null> {
@@ -241,6 +346,7 @@ function createConnection(
           capabilities: negotiated,
           catalog: () => value,
           emit,
+          answerWaterfall,
           onClosed: () => {
             sessions.delete(input.sessionId);
           },
@@ -261,6 +367,9 @@ function createConnection(
       case "session.configure":
         await sessionOf(input.sessionId).configure(input.changes);
         emit({ type: "request.completed", requestId: input.requestId });
+        return;
+      case "session.permission":
+        await sessionOf(input.sessionId).answerPermission(input.permissionId, input.response);
         return;
       case "session.interrupt":
         await sessionOf(input.sessionId).interrupt();

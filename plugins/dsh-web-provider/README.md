@@ -21,6 +21,10 @@ commands you get:
   first turn, so a later switch fails with a clear message instead of silently doing nothing;
 - plan mode is a Paseo **setting toggle** (`plan_mode`), mapped to `/plan` and `/plan off`, so
   it composes with any preset instead of competing with it;
+- the host's **questions are Paseo permission cards**: `ask_user_question` arrives as a question
+  form and `exit_plan_mode` as a plan card with an Implement action, answered over the host's
+  `$events` waterfall. The session's **permission preset** (Read Only / Workspace Write / Full
+  access) is a select setting driven by the host's own `/permission` command;
 - sessions are real DSH sessions, so the same conversation is visible to the DSH web UI (and
   anything else attached to that host).
 
@@ -100,10 +104,10 @@ the host's `name` when a preset has one.
   own that.
 - **No session import list.** `session.list` is not advertised, so the import picker stays empty;
   resume works through the persistence handle (`{version:1, data:{sessionId}}`).
+- **No goal surface.** DSH goals render as notices and `/goal`; Paseo has no goal UI to attach
+  them to.
 - **No mid-conversation preset switch.** DSH records the preset on the first turn and keeps that
   composition; changing it needs a new agent (the provider refuses rather than no-oping).
-- **No plan-review card.** `exit_plan_mode` needs a DSH client to answer its review; from Paseo
-  the agent presents the plan in the conversation.
 - **No live token deltas.** Assistant text is projected when the step commits, like the one-shot
   provider.
 

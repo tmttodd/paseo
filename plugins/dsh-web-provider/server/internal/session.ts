@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type {
   ProviderCommand,
+  ProviderPermissionResponse,
   ProviderConfigChanges,
   ProviderError,
   ProviderEvent,
@@ -30,7 +31,7 @@ import {
   type Json,
   type ToolRecord,
 } from "./timeline.js";
-import { DshError, type DshWire, type StreamHandle } from "./wire.js";
+import { DshError, type DshResult, type DshWire, type StreamHandle } from "./wire.js";
 
 /**
  * One Paseo session backed by one DSH session in the owned `dsh web` host.
@@ -58,6 +59,7 @@ interface SnapshotProjections {
     agentPreset?: string | null;
     sessionListMetadata?: { blank?: boolean; lastPromptAt?: number | null };
     plan?: { active?: boolean; pending?: boolean };
+    permissions?: { currentValue?: string };
     modelSelection?: {
       lastUsed?: { provider?: string; model?: string; reasoningEffort?: string } | null;
       next?: { provider?: string; model?: string; reasoningEffort?: string } | null;
@@ -84,9 +86,28 @@ interface SessionOptions {
   catalog: () => CatalogValue | null;
   emit: (event: ProviderEvent) => void;
   onClosed: () => void;
+  /** Answer a `$events` waterfall (the host's human-interaction channel). */
+  answerWaterfall: (eventId: string, outcome: Json) => Promise<DshResult>;
+}
+
+/** One host question call waiting for a human answer. */
+interface PendingQuestion {
+  permissionId: string;
+  eventId: string;
+  callId: string;
+  questions: Array<{
+    id: string;
+    question: string;
+    header?: string;
+    detail?: string;
+    options?: Array<{ label: string; description?: string }>;
+    multiSelect?: boolean;
+  }>;
 }
 
 const SNAPSHOT_TIMEOUT_MS = 30_000;
+/** The Paseo settings id for DSH's permission preset. */
+const PERMISSION_SETTING_ID = "permission_preset";
 const INTERRUPT_SETTLE_MS = 10_000;
 /** Commands Paseo cannot present as a result (a ZIP download); the host still lists them. */
 const HIDDEN_COMMANDS = new Set(["export"]);
@@ -100,8 +121,17 @@ export class Session {
   private closed = false;
   private replayDone = false;
   private planActive = false;
+
+  /** The DSH session id this Paseo session drives (waterfall routing). */
+  get dshSessionId(): string | undefined {
+    return this.nativeId;
+  }
+
   private presets: PresetEntry[] = [];
   private currentPreset: string | undefined;
+  private permissionPreset: string | undefined;
+  private permissionOptions: Array<{ value: string; name: string; description?: string }> = [];
+  private readonly pendingQuestions = new Map<string, PendingQuestion>();
   /** DSH fixes the agent preset at the first turn; until then it can be selected. */
   private blank = true;
   private selectedModel: string | undefined;
@@ -166,6 +196,7 @@ export class Session {
     const snapshot = await this.startFollow();
     this.adoptSnapshot(snapshot);
     await this.loadPresets();
+    await this.loadPermissionCatalog();
     this.emitConfig();
     await this.loadCommands();
     if (history === "replay") this.replay(snapshot);
@@ -187,36 +218,20 @@ export class Session {
     if (this.closed) throw new DshError("DSH session is closed", "SESSION_CLOSED");
     const settings = changes.settings ?? {};
     for (const key of Object.keys(settings)) {
-      if (key !== PLAN_SETTING_ID)
+      if (key !== PLAN_SETTING_ID && key !== PERMISSION_SETTING_ID) {
         throw new DshError(`DSH has no setting ${JSON.stringify(key)}`, "UNSUPPORTED_SETTING");
+      }
     }
     if (typeof settings[PLAN_SETTING_ID] === "boolean") {
       const active = settings[PLAN_SETTING_ID];
       await this.runLine(active ? "/plan" : "/plan off");
       this.planActive = active;
     }
+    await this.applyPermissionSetting(settings[PERMISSION_SETTING_ID]);
     if (changes.mode !== undefined && changes.mode !== null) {
       await this.selectPreset(changes.mode);
     }
-    const model = changes.model === null ? undefined : (changes.model ?? this.selectedModel);
-    const effort =
-      changes.thinkingOption === null ? undefined : (changes.thinkingOption ?? this.thinkingOption);
-    if (changes.model !== undefined || changes.thinkingOption !== undefined) {
-      const parsed = model === undefined ? undefined : parseModelId(model);
-      if (parsed === undefined)
-        throw new DshError("Choose a model before changing effort", "NO_MODEL");
-      const selected = await this.options.wire.call("session/selectModel", {
-        request: {
-          sessionId: this.nativeId,
-          provider: parsed.provider,
-          model: parsed.model,
-          ...(effort === undefined ? {} : { reasoningEffort: effort }),
-        },
-      });
-      if (!selected.ok) throw new DshError(selected.error.message, selected.error.code);
-      this.selectedModel = model;
-      this.thinkingOption = effort;
-    }
+    await this.applyModelSelection(changes);
     this.emitConfig();
   }
 
@@ -487,6 +502,159 @@ export class Session {
     }
   }
 
+  private acceptProjection(frame: { key?: unknown; value?: unknown }): void {
+    if (frame.key !== "permissions") return;
+    const value = frame.value as { currentValue?: unknown } | null | undefined;
+    if (typeof value?.currentValue !== "string") return;
+    if (this.permissionPreset === value.currentValue) return;
+    this.permissionPreset = value.currentValue;
+    if (this.opened) this.emitConfig();
+  }
+
+  /** A `$events` waterfall for this session: the host needs a human answer. */
+  acceptWaterfall(event: string, eventId: string, request: Record<string, unknown>): void {
+    if (event !== "user-questions/request") return;
+    const questions = Array.isArray(request.questions)
+      ? (request.questions as PendingQuestion["questions"])
+      : [];
+    const wait = request.wait as { callId?: unknown } | undefined;
+    if (questions.length === 0 || typeof wait?.callId !== "string") return;
+    const permissionId = `dsh-question-${eventId}`;
+    this.pendingQuestions.set(permissionId, {
+      permissionId,
+      eventId,
+      callId: wait.callId,
+      questions,
+    });
+    const plan = questions.find((question) => question.id === "plan-review");
+    if (plan !== undefined) {
+      const planText = plan.detail ?? plan.question;
+      this.options.emit({
+        type: "session.permission",
+        sessionId: this.options.id,
+        request: {
+          id: permissionId,
+          name: "plan-review",
+          kind: "plan",
+          title: "Plan ready for review",
+          description: planText,
+          metadata: { planText },
+          actions: [
+            {
+              id: "implement",
+              label: "Implement",
+              behavior: "allow",
+              variant: "primary",
+              intent: "implement",
+            },
+            {
+              id: "dismiss",
+              label: "Keep planning",
+              behavior: "deny",
+              variant: "secondary",
+              intent: "dismiss",
+            },
+          ],
+        },
+      });
+      return;
+    }
+    this.options.emit({
+      type: "session.permission",
+      sessionId: this.options.id,
+      request: {
+        id: permissionId,
+        name: "user-question",
+        kind: "question",
+        title: questions[0]?.header ?? "Question",
+        input: {
+          questions: questions.map((question) => ({
+            question: question.question,
+            header: question.header ?? question.id,
+            options: question.options ?? [],
+            multiSelect: question.multiSelect === true,
+            allowOther: true,
+          })),
+        },
+      },
+    });
+  }
+
+  /** The question was settled elsewhere (the DSH browser answered it). */
+  onWaterfallCancel(eventId: string): void {
+    const permissionId = `dsh-question-${eventId}`;
+    if (!this.pendingQuestions.delete(permissionId)) return;
+    this.options.emit({
+      type: "session.permission_resolved",
+      sessionId: this.options.id,
+      permissionId,
+    });
+  }
+
+  /** A Paseo permission response for one pending host question. */
+  async answerPermission(
+    permissionId: string,
+    response: ProviderPermissionResponse,
+  ): Promise<void> {
+    const pending = this.pendingQuestions.get(permissionId);
+    if (pending === undefined) return;
+    const answers = this.answersFor(pending, response);
+    const result = await this.options.answerWaterfall(pending.eventId, {
+      kind: "result",
+      value: { answers },
+    });
+    if (!result.ok) throw new DshError(result.error.message, result.error.code);
+    this.pendingQuestions.delete(permissionId);
+    this.options.emit({
+      type: "session.permission_resolved",
+      sessionId: this.options.id,
+      permissionId,
+    });
+  }
+
+  private answersFor(
+    pending: PendingQuestion,
+    response: ProviderPermissionResponse,
+  ): Array<{ id: string; selected: string[]; custom?: string }> {
+    if (pending.questions.some((question) => question.id === "plan-review")) {
+      return [
+        {
+          id: "plan-review",
+          selected: [response.behavior === "allow" ? "Approve" : "Keep planning"],
+          ...(response.behavior === "deny" && response.message !== undefined
+            ? { custom: response.message }
+            : {}),
+        },
+      ];
+    }
+    const provided =
+      response.behavior === "allow" && typeof response.updatedInput === "object"
+        ? (response.updatedInput.answers as Record<string, unknown> | undefined)
+        : undefined;
+    return pending.questions.map((question) => {
+      const key = question.header ?? question.id;
+      const value = provided?.[key];
+      if (typeof value !== "string" || value.trim() === "") {
+        return { id: question.id, selected: [] };
+      }
+      const labels = new Set((question.options ?? []).map((option) => option.label));
+      const selected: string[] = [];
+      const custom: string[] = [];
+      for (const token of value
+        .split(", ")
+        .map((part) => part.trim())
+        .filter(Boolean)) {
+        if (labels.has(token)) selected.push(token);
+        else custom.push(token);
+      }
+      return {
+        id: question.id,
+        selected,
+        ...(custom.length === 0 ? {} : { custom: custom.join(", ") }),
+      };
+    });
+  }
+
   private acceptFrame(value: unknown): void {
     if (typeof value !== "object" || value === null) return;
     const frame = value as { type?: unknown };
@@ -506,6 +674,10 @@ export class Session {
       if (event !== undefined) this.project(event, false);
       return;
     }
+    if (frame.type === "projection") {
+      this.acceptProjection(value as { key?: unknown; value?: unknown });
+      return;
+    }
     // `assistant-stream` is not requested; live text arrives with the committed
     // assistant message.
   }
@@ -515,9 +687,16 @@ export class Session {
     if (typeof values?.agentPreset === "string") this.currentPreset = values.agentPreset;
     if (values?.sessionListMetadata?.blank === false) this.blank = false;
     this.planActive = values?.plan?.active === true;
+    this.adoptPermission(values?.permissions);
     this.adoptSelection(values?.modelSelection?.next ?? values?.modelSelection?.lastUsed);
     if (values?.goal?.goal !== undefined && values.goal.goal.objective !== undefined) {
       this.noticeGoal(values.goal.goal.objective, values.goal.goal.phase);
+    }
+  }
+
+  private adoptPermission(permission: { currentValue?: string } | null | undefined): void {
+    if (typeof permission?.currentValue === "string") {
+      this.permissionPreset = permission.currentValue;
     }
   }
 
@@ -811,6 +990,25 @@ export class Session {
     });
   }
 
+  private async loadPermissionCatalog(): Promise<void> {
+    const result = await this.options.wire.call("permissionPresets/catalog", {});
+    if (!result.ok) return;
+    const value = result.value as { options?: unknown } | null;
+    if (!Array.isArray(value?.options)) return;
+    const options: Array<{ value: string; name: string; description?: string }> = [];
+    for (const entry of value.options) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const option = entry as { value?: unknown; name?: unknown; description?: unknown };
+      if (typeof option.value !== "string" || typeof option.name !== "string") continue;
+      options.push({
+        value: option.value,
+        name: option.name,
+        ...(typeof option.description === "string" ? { description: option.description } : {}),
+      });
+    }
+    this.permissionOptions = options;
+  }
+
   private async loadPresets(): Promise<void> {
     const result = await this.options.wire.call("agentPresets/list", {});
     if (!result.ok) return;
@@ -822,6 +1020,43 @@ export class Session {
    * and then keeps that composition, so this is a pre-first-turn action; after
    * that the provider refuses instead of silently doing nothing.
    */
+  private async applyModelSelection(changes: ProviderConfigChanges): Promise<void> {
+    if (changes.model === undefined && changes.thinkingOption === undefined) return;
+    const model = changes.model === null ? undefined : (changes.model ?? this.selectedModel);
+    const effort =
+      changes.thinkingOption === null ? undefined : (changes.thinkingOption ?? this.thinkingOption);
+    const parsed = model === undefined ? undefined : parseModelId(model);
+    if (parsed === undefined) {
+      throw new DshError("Choose a model before changing effort", "NO_MODEL");
+    }
+    const selected = await this.options.wire.call("session/selectModel", {
+      request: {
+        sessionId: this.nativeId,
+        provider: parsed.provider,
+        model: parsed.model,
+        ...(effort === undefined ? {} : { reasoningEffort: effort }),
+      },
+    });
+    if (!selected.ok) throw new DshError(selected.error.message, selected.error.code);
+    this.selectedModel = model;
+    this.thinkingOption = effort;
+  }
+
+  private async applyPermissionSetting(value: unknown): Promise<void> {
+    if (value === undefined) return;
+    if (typeof value !== "string") {
+      throw new DshError("The permission preset must be a string", "INVALID_SETTING");
+    }
+    if (!this.permissionOptions.some((option) => option.value === value)) {
+      throw new DshError(
+        `DSH has no permission preset ${JSON.stringify(value)}`,
+        "INVALID_SETTING",
+      );
+    }
+    await this.runLine(`/permission ${value}`);
+    this.permissionPreset = value;
+  }
+
   private async selectPreset(id: string): Promise<void> {
     if (!this.blank) {
       throw new DshError(
@@ -853,7 +1088,24 @@ export class Session {
         models: catalog?.models ?? [],
         modes,
         thinkingOptions: catalog?.thinkingOptions ?? [],
-        settings: [planSetting(this.planActive)],
+        settings: [
+          planSetting(this.planActive),
+          ...(this.permissionOptions.length === 0
+            ? []
+            : [
+                {
+                  type: "select" as const,
+                  id: PERMISSION_SETTING_ID,
+                  label: "Permissions",
+                  description: "Sandbox and approval policy for this session",
+                  value: this.permissionPreset ?? null,
+                  options: this.permissionOptions.map((option) => ({
+                    label: option.name,
+                    value: option.value,
+                  })),
+                },
+              ]),
+        ],
       },
     });
   }
