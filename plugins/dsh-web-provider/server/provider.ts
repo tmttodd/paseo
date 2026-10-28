@@ -289,9 +289,9 @@ function createConnection(
       };
     }
     eventSessions.delete(eventId);
-    return host.wire.call("$events/result", {
-      args: { clientId: eventsClientId, eventId, outcome },
-    });
+    // `call` wraps its argument object in the payload's `args`, so the result
+    // method takes the three fields directly (a nested `args` would be rejected).
+    return host.wire.call("$events/result", { clientId: eventsClientId, eventId, outcome });
   }
 
   async function loadCatalog(target: DshHost): Promise<CatalogValue | null> {

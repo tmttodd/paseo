@@ -602,7 +602,21 @@ export class Session {
       kind: "result",
       value: { answers },
     });
-    if (!result.ok) throw new DshError(result.error.message, result.error.code);
+    if (!result.ok) {
+      // The daemon has no request id to fail for a permission answer, so the
+      // failure is surfaced as a notice instead of a silent drop.
+      this.options.emit({
+        type: "session.notice",
+        sessionId: this.options.id,
+        notice: {
+          id: `permission-${permissionId}`,
+          severity: "warning",
+          title: "Could not answer the host's question",
+          description: result.error.message,
+        },
+      });
+      throw new DshError(result.error.message, result.error.code);
+    }
     this.pendingQuestions.delete(permissionId);
     this.options.emit({
       type: "session.permission_resolved",

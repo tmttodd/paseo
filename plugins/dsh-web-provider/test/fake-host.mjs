@@ -306,10 +306,10 @@ function dispatchSession(method, request, res, rpcId) {
 }
 
 function acceptWaterfallAnswer(request, res, rpcId) {
-  const args = request.args ?? {};
-  const answers = args?.outcome?.value?.answers;
+  const outcome = request.outcome;
+  const answers = outcome?.value?.answers;
   const valid =
-    args?.outcome?.kind === "result" &&
+    outcome?.kind === "result" &&
     Array.isArray(answers) &&
     answers.length > 0 &&
     typeof answers[0]?.id === "string" &&
