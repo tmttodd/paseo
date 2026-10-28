@@ -12,6 +12,7 @@ import {
   type ProviderLaunch,
 } from "@getpaseo/plugin/server/provider";
 import { createDshWebProvider } from "./provider.js";
+import { encodeContent } from "./internal/prompt.js";
 
 const fake = fileURLToPath(new URL("../test/fake-host.mjs", import.meta.url));
 const provider = createDshWebProvider();
@@ -144,6 +145,27 @@ function planToggle(value: boolean) {
 }
 
 describe("dsh-web provider", () => {
+  it("advertises image prompts and encodes them as DSH image blocks", async () => {
+    const { connection } = await harness();
+    expect(connection.capabilities).toContain("prompt.image");
+    expect(
+      encodeContent({
+        clientMessageId: "image-1",
+        delivery: "auto",
+        input: {
+          type: "message",
+          content: [
+            { type: "text", text: "what is in this image" },
+            { type: "image", data: "AAAA", mimeType: "image/png" },
+          ],
+        },
+      }),
+    ).toEqual([
+      { type: "text", text: "what is in this image" },
+      { type: "image", mediaType: "image/png", data: "AAAA" },
+    ]);
+  });
+
   it("advertises the host's models and the Build/Plan modes", async () => {
     const { request, events } = await harness();
     await request({ type: "catalog", requestId: "catalog-1" });

@@ -35,6 +35,9 @@ const CAPABILITIES = [
   "prompt.message",
   "prompt.command",
   "prompt.steer",
+  // The host's prompt accepts image content parts and its own limit report
+  // governs them; `encodeContent` maps Paseo images to DSH image blocks.
+  "prompt.image",
   "session.configure",
   "session.persistence",
 ] as const;

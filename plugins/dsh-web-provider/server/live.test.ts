@@ -250,6 +250,37 @@ live("dsh-web live", () => {
   );
 
   it(
+    "admits a prompt carrying an image",
+    async () => {
+      // 1x1 red PNG: the host validates the bytes against the declared media type.
+      const image =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+      await send({
+        type: "session.prompt",
+        sessionId: "live-1",
+        prompt: {
+          clientMessageId: "image-1",
+          delivery: "auto",
+          input: {
+            type: "message",
+            content: [
+              { type: "text", text: "What colour is this image?" },
+              { type: "image", data: image, mimeType: "image/png" },
+            ],
+          },
+        },
+      });
+      const admitted = await wait(
+        (event) => event.type === "session.prompt_result" && event.clientMessageId === "image-1",
+      );
+      if (admitted.type !== "session.prompt_result") throw new Error("prompt result missing");
+      expect(admitted.result.type).not.toBe("failed");
+      console.log("PASS check=image :: image prompt admitted");
+    },
+    TIMEOUT,
+  );
+
+  it(
     "refuses a preset switch after the first turn",
     async () => {
       const config = await wait((event) => event.type === "session.config");

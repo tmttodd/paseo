@@ -35,6 +35,17 @@ ptc=PTC, minimal=Minimal, cordis=Creator`);
 Verified live: roster listing, pre-first-turn switch to `ptc`, `plan_mode`
 true/false around `/plan`, and the post-turn refusal — 6 live checks green, 10
 unit tests green.
+
+### v3 — images (2026-10-28)
+
+A separate agent's probe proved the model behind `homelab/deepseek-v4.1-flash`
+is image-capable (vision encoder tokens on every image call, `vision_config` in
+the checkpoint, and image probes with controls), while Paseo refused attachments
+with `Provider does not support prompt.image`. The provider now advertises
+`prompt.image` and `encodeContent` maps Paseo images to DSH image blocks; the
+host's `imageLimits` projection governs size and count. Unit test pins the
+capability and the block mapping; the live suite admits a real 1x1 PNG through
+`session/prompt` and gets a turn back.
 Goal: goal-6d730275-6f89-4d03-afb3-caa4891a9f55.
 DDR: /tmp/dsh-ddr/2026-10-28-dsh-web-provider.ddr.yaml.
 

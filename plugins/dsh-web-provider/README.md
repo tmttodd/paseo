@@ -12,6 +12,9 @@ commands you get:
   `/plan`, `/compact`, `/feedback`, `/permission` with the host's own argument hints;
 - a command submission runs `commands/execute` on the host — `/goal` creates and arms a
   persisted goal, `/plan` flips the host's plan mode, neither creates a model message;
+- **images** travel as DSH image blocks (`prompt.image` is advertised, and the host's own
+  `imageLimits` report governs size/count), so attaching a picture in the composer reaches the
+  model through the same route the browser uses;
 - the host's **agent presets** are Paseo's modes: `standard`, `ptc`, `cordis` (labelled
   **Creator**, as the DSH web UI does), `minimal`, and any custom preset the profile defines.
   Selecting one before the first turn switches the host's preset; DSH fixes the preset at the
@@ -84,6 +87,7 @@ own overlay instead.
 | Paseo control | DSH mechanism                                                                    | When it applies                 |
 | ------------- | -------------------------------------------------------------------------------- | ------------------------------- |
 | mode picker   | `agentPresets/list` → modes; `session.configure({mode})` → `agentPresets/select` | before the session's first turn |
+| image attach  | `session/prompt` image content blocks (`prompt.image`)                           | any prompt                      |
 | Plan toggle   | `settings[{id:"plan_mode"}]` → `/plan` / `/plan off`                             | any time                        |
 
 Presets the host reports as broken are not offered. Shipped presets publish no display name, so
