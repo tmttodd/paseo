@@ -263,13 +263,15 @@ function acceptPrompt(request, res, rpcId) {
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("");
-  ok(res, rpcId, { accepted: true });
   session.turn += 1;
   const turn = session.turn;
+  // dsh may start the turn before the prompt call returns; emit the start first
+  // so the suite pins the admission race.
+  broadcast(session, { type: "turn/start", data: { turn } });
+  ok(res, rpcId, { accepted: true });
   // A prompt mentioning "long" keeps its turn open so the suite can interrupt it.
   const slow = text.includes("long");
   setTimeout(() => {
-    broadcast(session, { type: "turn/start", data: { turn } });
     broadcast(session, {
       type: "user/message",
       data: {

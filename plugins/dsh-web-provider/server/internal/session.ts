@@ -287,6 +287,9 @@ export class Session {
       return;
     }
     const turnId = steering && active !== null ? active.id : randomUUID();
+    // dsh may start the turn before this call returns; the id must be queued
+    // first or `turn/start` mints a second one and the daemon waits forever.
+    if (!steering) this.pendingTurns.push(turnId);
     const result = await this.options.wire.call("session/prompt", {
       request: {
         requestId: prompt.clientMessageId,
@@ -296,10 +299,10 @@ export class Session {
       },
     });
     if (!result.ok) {
+      if (!steering) this.forgetPendingTurn(turnId);
       this.failPrompt(prompt.clientMessageId, result.error.message, result.error.code);
       return;
     }
-    if (!steering) this.pendingTurns.push(turnId);
     this.options.emit({
       type: "session.prompt_result",
       sessionId: this.options.id,
@@ -365,6 +368,12 @@ export class Session {
         "COMMAND_FAILED",
       );
     }
+  }
+
+  /** Drop a turn id whose prompt never reached the host. */
+  private forgetPendingTurn(turnId: string): void {
+    const index = this.pendingTurns.indexOf(turnId);
+    if (index >= 0) this.pendingTurns.splice(index, 1);
   }
 
   private failPrompt(clientMessageId: string, message: string, code?: string): void {
