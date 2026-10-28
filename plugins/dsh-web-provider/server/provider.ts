@@ -204,7 +204,7 @@ function createConnection(
     eventsClientId = undefined;
     eventsStream = target.wire.open(
       "$events",
-      { args: {} },
+      {},
       {
         item: (value) => acceptEventFrame(value),
         end: () => {
