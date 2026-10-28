@@ -358,7 +358,7 @@ function acceptPrompt(request, res, rpcId) {
           options: [{ label: "Approve" }, { label: "Keep planning" }],
         },
       ],
-      wait: { callId: "call-2" },
+      // `exit_plan_mode` asks without a `wait`; the waterfall eventId is the identity.
     });
   }
   // A prompt mentioning "long" keeps its turn open so the suite can interrupt it.

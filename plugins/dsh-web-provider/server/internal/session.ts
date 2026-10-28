@@ -94,7 +94,6 @@ interface SessionOptions {
 interface PendingQuestion {
   permissionId: string;
   eventId: string;
-  callId: string;
   questions: Array<{
     id: string;
     question: string;
@@ -517,13 +516,13 @@ export class Session {
     const questions = Array.isArray(request.questions)
       ? (request.questions as PendingQuestion["questions"])
       : [];
-    const wait = request.wait as { callId?: unknown } | undefined;
-    if (questions.length === 0 || typeof wait?.callId !== "string") return;
+    // `ask_user_question` carries `wait.callId`; `exit_plan_mode` does not, and
+    // the waterfall eventId is the identity either way.
+    if (questions.length === 0) return;
     const permissionId = `dsh-question-${eventId}`;
     this.pendingQuestions.set(permissionId, {
       permissionId,
       eventId,
-      callId: wait.callId,
       questions,
     });
     const plan = questions.find((question) => question.id === "plan-review");
