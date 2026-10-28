@@ -21,6 +21,8 @@ commands you get:
   first turn, so a later switch fails with a clear message instead of silently doing nothing;
 - plan mode is a Paseo **setting toggle** (`plan_mode`), mapped to `/plan` and `/plan off`, so
   it composes with any preset instead of competing with it;
+- the host's **skills are commands**: `skills/list` entries appear in the composer and a
+  `/skill-name` prompt is sent as message text, which is how DSH injects the skill;
 - the host's **questions are Paseo permission cards**: `ask_user_question` arrives as a question
   form and `exit_plan_mode` as a plan card with an Implement action, answered over the host's
   `$events` waterfall. The session's **permission preset** (Read Only / Workspace Write / Full

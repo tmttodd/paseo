@@ -202,6 +202,7 @@ function dispatchCommand(method, request, res, rpcId) {
     runGoal(session, rest, res, rpcId);
     return;
   }
+  fail(res, rpcId, "UNKNOWN_COMMAND", `no command ${name}`);
   ok(res, rpcId, undefined);
 }
 
@@ -243,6 +244,18 @@ function dispatchSession(method, request, res, rpcId) {
       ok(res, rpcId, { sessionId, agentPreset: session.preset });
       return;
     }
+    case "skills/list":
+      ok(res, rpcId, {
+        skills: [
+          {
+            name: "deep-research",
+            description: "Research a question thoroughly",
+            modelInvocable: true,
+          },
+          { name: "write-tests", description: "Write focused tests", modelInvocable: true },
+        ],
+      });
+      return;
     case "permissionPresets/catalog":
       ok(res, rpcId, {
         options: [

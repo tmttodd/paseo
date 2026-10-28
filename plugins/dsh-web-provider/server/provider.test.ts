@@ -215,6 +215,8 @@ describe("dsh-web provider", () => {
       "plan",
       "compact",
       "feedback",
+      "deep-research",
+      "write-tests",
     ]);
     const config = events.find((event) => event.type === "session.config");
     if (config?.type !== "session.config") throw new Error("config missing");
@@ -441,6 +443,29 @@ describe("dsh-web provider", () => {
     await wait(
       (event) =>
         event.type === "session.permission_resolved" && event.permissionId === ask.request.id,
+    );
+  });
+
+  it("advertises host skills and runs them as message text", async () => {
+    const { open, events, send, wait } = await harness();
+    await open();
+    const commands = events.find((event) => event.type === "session.commands");
+    if (commands?.type !== "session.commands") throw new Error("commands missing");
+    expect(commands.commands.map((command) => command.name)).toContain("deep-research");
+    await send({
+      type: "session.prompt",
+      sessionId: "s",
+      prompt: {
+        clientMessageId: "skill-1",
+        delivery: "auto",
+        input: { type: "command", name: "deep-research", arguments: "ship it" },
+      },
+    });
+    await wait(
+      (event) =>
+        event.type === "timeline.item" &&
+        event.item.type === "user_message" &&
+        event.item.text === "/deep-research ship it",
     );
   });
 

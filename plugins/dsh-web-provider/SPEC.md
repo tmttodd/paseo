@@ -36,6 +36,19 @@ Verified live: roster listing, pre-first-turn switch to `ptc`, `plan_mode`
 true/false around `/plan`, and the post-turn refusal — 6 live checks green, 10
 unit tests green.
 
+### v5 — host skills as commands (2026-10-28)
+
+DSH exposes the user-invocable skill catalog over `skills/list` (`{request:{sessionId}}` →
+`{skills:[{name, description, whenToUse?, modelInvocable, path?}]}`), and it injects a skill when
+a user message contains a whitespace-bounded `/name`. The provider now merges that catalog into
+`session.commands` and routes a command prompt whose name is a skill to `session/prompt` **text**
+(`/name args`) instead of `commands/execute`, which has no skill surface. Host commands win on a
+name collision, and the `export` command stays hidden.
+
+Verified live: the shipped scratch profile lists six skills (`paseo`, `paseo-advisor`,
+`paseo-committee`, `paseo-handoff`, `paseo-help`, `paseo-plugin`) in the command list; 15 unit
+tests pin the merge and the text routing.
+
 ### v4 — host questions and the permission preset (2026-10-28)
 
 DSH asks the user through a `$events` waterfall (`user-questions/request`; the answer is a

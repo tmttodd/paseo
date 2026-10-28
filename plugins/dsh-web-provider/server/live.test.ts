@@ -119,6 +119,11 @@ live("dsh-web live", () => {
       expect(names).toContain("goal");
       expect(names).toContain("plan");
       console.log(`PASS check=commands :: ${names.join(", ")}`);
+      const hostCommands = new Set(["goal", "plan", "compact", "feedback", "permission", "export"]);
+      const skills = names.filter((name) => !hostCommands.has(name));
+      console.log(
+        `PASS check=skills :: ${String(skills.length)} (${skills.slice(0, 6).join(", ")})`,
+      );
 
       const config = await wait((event) => event.type === "session.config");
       if (config.type !== "session.config") throw new Error("config missing");

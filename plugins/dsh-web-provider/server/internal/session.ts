@@ -131,6 +131,8 @@ export class Session {
   private permissionPreset: string | undefined;
   private permissionOptions: Array<{ value: string; name: string; description?: string }> = [];
   private readonly pendingQuestions = new Map<string, PendingQuestion>();
+  /** Skills the host resolves from a `/name` token in a user message. */
+  private readonly skillNames = new Set<string>();
   /** DSH fixes the agent preset at the first turn; until then it can be selected. */
   private blank = true;
   private selectedModel: string | undefined;
@@ -207,6 +209,24 @@ export class Session {
   async prompt(prompt: ProviderPrompt): Promise<void> {
     if (this.closed) throw new DshError("DSH session is closed", "SESSION_CLOSED");
     if (prompt.input.type === "command") {
+      // dsh injects a skill when a user message carries a whitespace-bounded
+      // `/name`; it has no command surface for skills, so they ride the message
+      // path while real commands go to `commands/execute`.
+      if (this.skillNames.has(prompt.input.name)) {
+        await this.sendMessage({
+          ...prompt,
+          input: {
+            type: "message",
+            content: [
+              {
+                type: "text",
+                text: `/${prompt.input.name} ${prompt.input.arguments}`.trim(),
+              },
+            ],
+          },
+        });
+        return;
+      }
       await this.executeCommand(prompt);
       return;
     }
@@ -418,8 +438,36 @@ export class Session {
         ...(typeof value.input?.hint === "string" ? { argumentHint: value.input.hint } : {}),
       });
     }
+    for (const skill of await this.loadSkills(commands)) commands.push(skill);
     this.commands = commands;
     this.options.emit({ type: "session.commands", sessionId: this.options.id, commands });
+  }
+
+  /** User-invocable skills, advertised as commands but executed as message text. */
+  private async loadSkills(commands: readonly ProviderCommand[]): Promise<ProviderCommand[]> {
+    const result = await this.options.wire.call("skills/list", {
+      request: { sessionId: this.nativeId },
+    });
+    if (!result.ok) return [];
+    const value = result.value as { skills?: unknown } | null;
+    const skills = Array.isArray(value?.skills) ? value.skills : [];
+    const taken = new Set(commands.map((command) => command.name));
+    const loaded: ProviderCommand[] = [];
+    for (const entry of skills) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const skill = entry as { name?: unknown; description?: unknown };
+      if (typeof skill.name !== "string" || skill.name === "") continue;
+      if (taken.has(skill.name)) continue;
+      this.skillNames.add(skill.name);
+      loaded.push({
+        name: skill.name,
+        description:
+          typeof skill.description === "string" && skill.description !== ""
+            ? skill.description
+            : skill.name,
+      });
+    }
+    return loaded;
   }
 
   private async startFollow(): Promise<FollowSnapshot> {
