@@ -11,7 +11,15 @@ import type {
   ProviderTimelineItem,
   ProviderUsage,
 } from "@getpaseo/plugin/server/provider";
-import { DEFAULT_MODE_ID, PLAN_MODE_ID, parseModelId, type CatalogValue } from "./catalog.js";
+import {
+  PLAN_SETTING_ID,
+  modesFromPresets,
+  parseModelId,
+  planSetting,
+  presetsFromHost,
+  type CatalogValue,
+  type PresetEntry,
+} from "./catalog.js";
 import { encodeContent } from "./prompt.js";
 import {
   assistantMessageItem,
@@ -47,6 +55,8 @@ interface SessionEvent {
 interface SnapshotProjections {
   values?: {
     title?: string | null;
+    agentPreset?: string | null;
+    sessionListMetadata?: { blank?: boolean; lastPromptAt?: number | null };
     plan?: { active?: boolean; pending?: boolean };
     modelSelection?: {
       lastUsed?: { provider?: string; model?: string; reasoningEffort?: string } | null;
@@ -90,6 +100,10 @@ export class Session {
   private closed = false;
   private replayDone = false;
   private planActive = false;
+  private presets: PresetEntry[] = [];
+  private currentPreset: string | undefined;
+  /** DSH fixes the agent preset at the first turn; until then it can be selected. */
+  private blank = true;
   private selectedModel: string | undefined;
   private thinkingOption: string | undefined;
   private commands: ProviderCommand[] = [];
@@ -129,6 +143,7 @@ export class Session {
       request: {
         cwd: this.config.cwd,
         ...(adopted === undefined ? {} : { sessionId: adopted }),
+        ...(this.config.mode === undefined ? {} : { agentPreset: this.config.mode }),
       },
     });
     if (!created.ok) throw new DshError(created.error.message, created.error.code);
@@ -137,6 +152,7 @@ export class Session {
       throw new DshError("dsh did not name the created Session", "SESSION_UNNAMED");
     }
     this.nativeId = value.sessionId;
+    if (typeof value.agentPreset === "string") this.currentPreset = value.agentPreset;
     this.options.emit({
       type: "session.opened",
       requestId,
@@ -149,6 +165,7 @@ export class Session {
 
     const snapshot = await this.startFollow();
     this.adoptSnapshot(snapshot);
+    await this.loadPresets();
     this.emitConfig();
     await this.loadCommands();
     if (history === "replay") this.replay(snapshot);
@@ -168,13 +185,18 @@ export class Session {
 
   async configure(changes: ProviderConfigChanges): Promise<void> {
     if (this.closed) throw new DshError("DSH session is closed", "SESSION_CLOSED");
-    if (changes.settings !== undefined && Object.keys(changes.settings).length > 0) {
-      throw new DshError("DSH has no provider settings", "UNSUPPORTED_SETTING");
+    const settings = changes.settings ?? {};
+    for (const key of Object.keys(settings)) {
+      if (key !== PLAN_SETTING_ID)
+        throw new DshError(`DSH has no setting ${JSON.stringify(key)}`, "UNSUPPORTED_SETTING");
+    }
+    if (typeof settings[PLAN_SETTING_ID] === "boolean") {
+      const active = settings[PLAN_SETTING_ID];
+      await this.runLine(active ? "/plan" : "/plan off");
+      this.planActive = active;
     }
     if (changes.mode !== undefined && changes.mode !== null) {
-      if (changes.mode === PLAN_MODE_ID) await this.runLine("/plan");
-      else if (changes.mode === DEFAULT_MODE_ID) await this.runLine("/plan off");
-      else throw new DshError(`DSH has no mode ${JSON.stringify(changes.mode)}`, "INVALID_MODE");
+      await this.selectPreset(changes.mode);
     }
     const model = changes.model === null ? undefined : (changes.model ?? this.selectedModel);
     const effort =
@@ -481,17 +503,23 @@ export class Session {
 
   private adoptSnapshot(snapshot: FollowSnapshot): void {
     const values = snapshot.projections?.values;
-    const plan = values?.plan?.active === true;
-    const selection = values?.modelSelection?.next ?? values?.modelSelection?.lastUsed;
+    if (typeof values?.agentPreset === "string") this.currentPreset = values.agentPreset;
+    if (values?.sessionListMetadata?.blank === false) this.blank = false;
+    this.planActive = values?.plan?.active === true;
+    this.adoptSelection(values?.modelSelection?.next ?? values?.modelSelection?.lastUsed);
+    if (values?.goal?.goal !== undefined && values.goal.goal.objective !== undefined) {
+      this.noticeGoal(values.goal.goal.objective, values.goal.goal.phase);
+    }
+  }
+
+  private adoptSelection(
+    selection: { provider?: string; model?: string; reasoningEffort?: string } | null | undefined,
+  ): void {
     if (typeof selection?.provider === "string" && typeof selection.model === "string") {
       this.selectedModel = `${selection.provider}/${selection.model}`;
     }
     if (typeof selection?.reasoningEffort === "string")
       this.thinkingOption = selection.reasoningEffort;
-    this.planActive = plan;
-    if (values?.goal?.goal !== undefined && values.goal.goal.objective !== undefined) {
-      this.noticeGoal(values.goal.goal.objective, values.goal.goal.phase);
-    }
   }
 
   private replay(snapshot: FollowSnapshot): void {
@@ -635,6 +663,7 @@ export class Session {
   }
 
   private acceptTurnStart(data: Record<string, unknown>, replay: boolean): void {
+    this.blank = false;
     const dshTurn = typeof data.turn === "number" ? data.turn : 0;
     const id = this.pendingTurns.shift() ?? `turn-${String(dshTurn)}-${randomUUID()}`;
     this.currentTurn = { id, dshTurn, usage: { input: 0, cached: 0, output: 0 } };
@@ -773,34 +802,49 @@ export class Session {
     });
   }
 
+  private async loadPresets(): Promise<void> {
+    const result = await this.options.wire.call("agentPresets/list", {});
+    if (!result.ok) return;
+    this.presets = presetsFromHost(result.value);
+  }
+
+  /**
+   * Select one agent preset. DSH records the preset on the Session's first turn
+   * and then keeps that composition, so this is a pre-first-turn action; after
+   * that the provider refuses instead of silently doing nothing.
+   */
+  private async selectPreset(id: string): Promise<void> {
+    if (!this.blank) {
+      throw new DshError(
+        "DSH fixes the agent preset at the session's first turn — start a new agent to change it",
+        "PRESET_LOCKED",
+      );
+    }
+    if (this.presets.length > 0 && !this.presets.some((preset) => preset.id === id)) {
+      throw new DshError(`DSH has no agent preset ${JSON.stringify(id)}`, "INVALID_MODE");
+    }
+    const selected = await this.options.wire.call("agentPresets/select", {
+      agentId: this.nativeId,
+      agentPreset: id,
+    });
+    if (!selected.ok) throw new DshError(selected.error.message, selected.error.code);
+    this.currentPreset = id;
+  }
+
   private emitConfig(): void {
     const catalog = this.options.catalog()?.catalog;
+    const { modes, mode } = modesFromPresets(this.presets, this.currentPreset);
     this.options.emit({
       type: "session.config",
       sessionId: this.options.id,
       config: {
         ...(this.selectedModel === undefined ? {} : { model: this.selectedModel }),
-        mode: this.planActive ? PLAN_MODE_ID : DEFAULT_MODE_ID,
+        ...(mode === undefined ? {} : { mode }),
         ...(this.thinkingOption === undefined ? {} : { thinkingOption: this.thinkingOption }),
         models: catalog?.models ?? [],
-        modes: [
-          {
-            id: DEFAULT_MODE_ID,
-            label: "Build",
-            description: "Implement changes",
-            colorTier: "safe",
-            icon: "Shield",
-          },
-          {
-            id: PLAN_MODE_ID,
-            label: "Plan",
-            description: "Explore and design before implementing",
-            colorTier: "planning",
-            icon: "ShieldEllipsis",
-          },
-        ],
+        modes,
         thinkingOptions: catalog?.thinkingOptions ?? [],
-        settings: [],
+        settings: [planSetting(this.planActive)],
       },
     });
   }

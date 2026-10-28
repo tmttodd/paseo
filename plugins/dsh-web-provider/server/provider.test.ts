@@ -136,6 +136,13 @@ async function harness() {
   return { connection, events, wait, send, request, open, prompt, command, cwd };
 }
 
+/** A config event whose plan-mode toggle reads `value`. */
+function planToggle(value: boolean) {
+  return (event: ProviderEvent): boolean =>
+    event.type === "session.config" &&
+    event.config.settings.some((setting) => setting.id === "plan_mode" && setting.value === value);
+}
+
 describe("dsh-web provider", () => {
   it("advertises the host's models and the Build/Plan modes", async () => {
     const { request, events } = await harness();
@@ -171,8 +178,27 @@ describe("dsh-web provider", () => {
     ]);
     const config = events.find((event) => event.type === "session.config");
     if (config?.type !== "session.config") throw new Error("config missing");
-    expect(config.config.mode).toBe("default");
-    expect(config.config.modes.map((mode) => mode.id)).toEqual(["default", "plan"]);
+    // The host's presets are the modes; the shipped ones have no published name,
+    // so the labels come from the DSH web UI's own mapping (cordis = Creator).
+    expect(config.config.mode).toBe("standard");
+    expect(config.config.modes.map((mode) => mode.id)).toEqual([
+      "standard",
+      "ptc",
+      "cordis",
+      "minimal",
+      "dsh-ops",
+    ]);
+    expect(config.config.modes.map((mode) => mode.label)).toEqual([
+      "Standard",
+      "PTC",
+      "Creator",
+      "Minimal",
+      "Ops",
+    ]);
+    // Plan is a toggle, not a mode, so both can coexist.
+    expect(config.config.settings).toEqual([
+      expect.objectContaining({ id: "plan_mode", type: "toggle", value: false }),
+    ]);
   });
 
   it("projects a prompt turn into prompt_result, turn, messages and usage", async () => {
@@ -211,11 +237,11 @@ describe("dsh-web provider", () => {
     expect(started.turnId).toBe(result.result.turnId);
   });
 
-  it("runs /plan as the host's own command and flips the mode", async () => {
+  it("runs /plan as the host's own command and flips the plan toggle", async () => {
     const { open, command, events, wait } = await harness();
     await open();
     const clientMessageId = await command("plan", "");
-    await wait((event) => event.type === "session.config" && event.config.mode === "plan");
+    await wait(planToggle(true));
     const result = events.find(
       (event) =>
         event.type === "session.prompt_result" && event.clientMessageId === clientMessageId,
@@ -232,7 +258,67 @@ describe("dsh-web provider", () => {
     const configs = events.filter((event) => event.type === "session.config");
     const latest = configs.at(-1);
     if (latest?.type !== "session.config") throw new Error("config missing");
-    expect(latest.config.mode).toBe("plan");
+    // Plan is a toggle: the preset mode is untouched.
+    expect(latest.config.mode).toBe("standard");
+  });
+
+  it("selects an agent preset before the first turn", async () => {
+    const { open, events, request, wait } = await harness();
+    await open();
+    await request({
+      type: "session.configure",
+      requestId: "mode-1",
+      sessionId: "s",
+      changes: { mode: "ptc" },
+    });
+    await wait((event) => event.type === "session.config" && event.config.mode === "ptc");
+    const latest = events.findLast((event) => event.type === "session.config");
+    if (latest?.type !== "session.config") throw new Error("config missing");
+    expect(latest.config.mode).toBe("ptc");
+    // The preset switch is a pre-first-turn action, so it is not a model turn.
+    expect(events.some((event) => event.type === "session.turn")).toBe(false);
+  });
+
+  it("refuses a preset switch after the first turn", async () => {
+    const { open, prompt, request, events, wait } = await harness();
+    await open();
+    await prompt("hello");
+    await wait((event) => event.type === "session.turn" && event.state === "completed");
+    await request({
+      type: "session.configure",
+      requestId: "mode-2",
+      sessionId: "s",
+      changes: { mode: "ptc" },
+    });
+    const failed = events.find(
+      (event) => event.type === "request.failed" && event.requestId === "mode-2",
+    );
+    if (failed?.type !== "request.failed") throw new Error("expected a failed configure");
+    expect(failed.error.message).toMatch(/first turn/);
+    expect(failed.error.code).toBe("PRESET_LOCKED");
+  });
+
+  it("honours a preset chosen when the session is created", async () => {
+    const { request, events } = await harness();
+    await request({
+      type: "session.open",
+      requestId: "open-preset",
+      sessionId: "s2",
+      history: "skip",
+      config: {
+        cwd: "/tmp",
+        env: {},
+        settings: {},
+        mcpServers: {},
+        persist: true,
+        mode: "minimal",
+      },
+    });
+    const config = events.find(
+      (event) => event.type === "session.config" && event.sessionId === "s2",
+    );
+    if (config?.type !== "session.config") throw new Error("config missing");
+    expect(config.config.mode).toBe("minimal");
   });
 
   it("runs /goal through the host and surfaces the goal", async () => {

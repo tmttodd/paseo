@@ -2,6 +2,7 @@ import type {
   ProviderCatalog,
   ProviderMode,
   ProviderModel,
+  ProviderSetting,
   ProviderThinkingOption,
 } from "@getpaseo/plugin/server/provider";
 
@@ -19,33 +20,79 @@ export interface CatalogValue {
   routable: ReadonlySet<string>;
 }
 
-export const DEFAULT_MODE_ID = "default";
-export const PLAN_MODE_ID = "plan";
+/** The Paseo settings toggle that drives DSH's plan mode (the app checks this id first). */
+export const PLAN_SETTING_ID = "plan_mode";
 
 /**
- * Build and Build/Plan modes. The app renders any mode whose `colorTier` is
- * `planning` (or whose id is `plan`) as the single Plan Mode toggle, so the
- * pair here is what makes `/plan` a first-class composer control.
+ * DSH ships presets without a display name (`standard`, `ptc`, `cordis`,
+ * `minimal`); the web UI labels them Standard, PTC, Creator and Minimal. A
+ * preset that publishes a name wins over this map, and anything else falls
+ * back to its id.
  */
-export function modesFor(planActive: boolean): { modes: ProviderMode[]; mode: string } {
+const PRESET_LABELS: Readonly<Record<string, string>> = {
+  standard: "Standard",
+  ptc: "PTC",
+  cordis: "Creator",
+  minimal: "Minimal",
+};
+
+export interface PresetEntry {
+  id: string;
+  label: string;
+  description?: string;
+  isDefault: boolean;
+}
+
+/** Parse `agentPresets/list`: `{presets:[{id, isDefault, name?, description?, broken?}]}`. */
+export function presetsFromHost(raw: unknown): PresetEntry[] {
+  if (!isRecord(raw)) return [];
+  const list = Array.isArray(raw.presets) ? raw.presets : [];
+  const presets: PresetEntry[] = [];
+  for (const entry of list) {
+    if (!isRecord(entry) || typeof entry.id !== "string" || entry.id === "") continue;
+    // A preset the host itself cannot compose is not offered: selecting it would
+    // fail at the first turn.
+    if (typeof entry.broken === "string" && entry.broken !== "") continue;
+    presets.push({
+      id: entry.id,
+      label:
+        typeof entry.name === "string" && entry.name !== ""
+          ? entry.name
+          : (PRESET_LABELS[entry.id] ?? entry.id),
+      ...(typeof entry.description === "string" && entry.description !== ""
+        ? { description: entry.description }
+        : {}),
+      isDefault: entry.isDefault === true,
+    });
+  }
+  return presets;
+}
+
+/** Presets → Paseo modes, keeping the host's order and naming the current one. */
+export function modesFromPresets(
+  presets: readonly PresetEntry[],
+  current: string | undefined,
+): { modes: ProviderMode[]; mode: string | undefined } {
+  const modes = presets.map((preset) => ({
+    id: preset.id,
+    label: preset.label,
+    ...(preset.description === undefined ? {} : { description: preset.description }),
+  }));
+  const mode =
+    current !== undefined && presets.some((preset) => preset.id === current)
+      ? current
+      : presets.find((preset) => preset.isDefault)?.id;
+  return { modes, mode };
+}
+
+/** The plan-mode toggle: DSH's plan state is a switch, not a preset. */
+export function planSetting(active: boolean): ProviderSetting {
   return {
-    modes: [
-      {
-        id: DEFAULT_MODE_ID,
-        label: "Build",
-        description: "Implement changes",
-        colorTier: "safe",
-        icon: "Shield",
-      },
-      {
-        id: PLAN_MODE_ID,
-        label: "Plan",
-        description: "Explore and design before implementing",
-        colorTier: "planning",
-        icon: "ShieldEllipsis",
-      },
-    ],
-    mode: planActive ? PLAN_MODE_ID : DEFAULT_MODE_ID,
+    type: "toggle",
+    id: PLAN_SETTING_ID,
+    label: "Plan",
+    description: "Explore and design before implementing",
+    value: active,
   };
 }
 

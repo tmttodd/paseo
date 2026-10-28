@@ -27,6 +27,13 @@ import { createDshWebProvider } from "./provider.js";
 const live = process.env.DSH_WEB_LIVE === "1" ? describe : describe.skip;
 const TIMEOUT = 240_000;
 
+/** A config event whose plan-mode toggle reads `value`. */
+function planToggle(value: boolean) {
+  return (event: ProviderEvent): boolean =>
+    event.type === "session.config" &&
+    event.config.settings.some((setting) => setting.id === "plan_mode" && setting.value === value);
+}
+
 async function dshBinary(): Promise<string> {
   const { stdout } = await execCommand("/usr/bin/which", ["dsh"]);
   return stdout.trim();
@@ -112,6 +119,37 @@ live("dsh-web live", () => {
       expect(names).toContain("goal");
       expect(names).toContain("plan");
       console.log(`PASS check=commands :: ${names.join(", ")}`);
+
+      const config = await wait((event) => event.type === "session.config");
+      if (config.type !== "session.config") throw new Error("config missing");
+      const modes = config.config.modes;
+      expect(modes.length).toBeGreaterThan(0);
+      expect(modes.map((mode) => mode.id)).toContain("standard");
+      expect(config.config.settings.some((setting) => setting.id === "plan_mode")).toBe(true);
+      const creator = modes.find((mode) => mode.id === "cordis");
+      if (creator !== undefined) expect(creator.label).toBe("Creator");
+      console.log(
+        `PASS check=presets :: ${modes.map((mode) => `${mode.id}=${mode.label}`).join(", ")}`,
+      );
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "selects an agent preset before the first turn",
+    async () => {
+      const config = await wait((event) => event.type === "session.config");
+      if (config.type !== "session.config") throw new Error("config missing");
+      const target = config.config.modes.find((mode) => mode.id !== config.config.mode);
+      if (target === undefined) throw new Error("the host offers only one preset");
+      await send({
+        type: "session.configure",
+        requestId: "preset-switch",
+        sessionId: "live-1",
+        changes: { mode: target.id },
+      });
+      await wait((event) => event.type === "session.config" && event.config.mode === target.id);
+      console.log(`PASS check=preset-switch :: ${target.id}`);
     },
     TIMEOUT,
   );
@@ -135,8 +173,8 @@ live("dsh-web live", () => {
           event.clientMessageId === clientMessageId &&
           event.result.type === "completed",
       );
-      await wait((event) => event.type === "session.config" && event.config.mode === "plan");
-      console.log("PASS check=plan-on :: mode=plan");
+      await wait(planToggle(true));
+      console.log("PASS check=plan-on :: plan_mode=true");
 
       const offMessageId = "plan-off";
       await send({
@@ -148,8 +186,8 @@ live("dsh-web live", () => {
           input: { type: "command", name: "plan", arguments: "off" },
         },
       });
-      await wait((event) => event.type === "session.config" && event.config.mode === "default");
-      console.log("PASS check=plan-off :: mode=default");
+      await wait(planToggle(false));
+      console.log("PASS check=plan-off :: plan_mode=false");
     },
     TIMEOUT,
   );
@@ -207,6 +245,29 @@ live("dsh-web live", () => {
           `PASS check=prompt :: turn failed at the adapter (${terminal.error?.message ?? "no message"})`,
         );
       }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a preset switch after the first turn",
+    async () => {
+      const config = await wait((event) => event.type === "session.config");
+      if (config.type !== "session.config") throw new Error("config missing");
+      const target = config.config.modes.find((mode) => mode.id !== config.config.mode);
+      if (target === undefined) return;
+      await send({
+        type: "session.configure",
+        requestId: "preset-late",
+        sessionId: "live-1",
+        changes: { mode: target.id },
+      });
+      const failed = await wait(
+        (event) => event.type === "request.failed" && event.requestId === "preset-late",
+      );
+      if (failed.type !== "request.failed") throw new Error("expected a failed configure");
+      expect(failed.error.code).toBe("PRESET_LOCKED");
+      console.log(`PASS check=preset-locked :: ${failed.error.message}`);
     },
     TIMEOUT,
   );

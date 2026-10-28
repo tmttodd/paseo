@@ -12,8 +12,12 @@ commands you get:
   `/plan`, `/compact`, `/feedback`, `/permission` with the host's own argument hints;
 - a command submission runs `commands/execute` on the host — `/goal` creates and arms a
   persisted goal, `/plan` flips the host's plan mode, neither creates a model message;
-- Plan mode also appears as a Paseo mode (the composer's Plan toggle), mapped to `/plan` and
-  `/plan off`;
+- the host's **agent presets** are Paseo's modes: `standard`, `ptc`, `cordis` (labelled
+  **Creator**, as the DSH web UI does), `minimal`, and any custom preset the profile defines.
+  Selecting one before the first turn switches the host's preset; DSH fixes the preset at the
+  first turn, so a later switch fails with a clear message instead of silently doing nothing;
+- plan mode is a Paseo **setting toggle** (`plan_mode`), mapped to `/plan` and `/plan off`, so
+  it composes with any preset instead of competing with it;
 - sessions are real DSH sessions, so the same conversation is visible to the DSH web UI (and
   anything else attached to that host).
 
@@ -73,12 +77,27 @@ naming a row the profile does not have is an error in DSH, so only rows that are
 listed. Set `isolate: false` to keep the profile exactly as composed, or `patch` to supply your
 own overlay instead.
 
+## Modes and plan
+
+`session.config` carries two independent controls:
+
+| Paseo control | DSH mechanism                                                                    | When it applies                 |
+| ------------- | -------------------------------------------------------------------------------- | ------------------------------- |
+| mode picker   | `agentPresets/list` → modes; `session.configure({mode})` → `agentPresets/select` | before the session's first turn |
+| Plan toggle   | `settings[{id:"plan_mode"}]` → `/plan` / `/plan off`                             | any time                        |
+
+Presets the host reports as broken are not offered. Shipped presets publish no display name, so
+the provider maps the known ids the way the DSH web UI labels them (`cordis` → Creator) and uses
+the host's `name` when a preset has one.
+
 ## What it does not do
 
 - **No MCP injection.** Paseo tools are not mounted into DSH sessions; the host's own MCP rows
   own that.
 - **No session import list.** `session.list` is not advertised, so the import picker stays empty;
   resume works through the persistence handle (`{version:1, data:{sessionId}}`).
+- **No mid-conversation preset switch.** DSH records the preset on the first turn and keeps that
+  composition; changing it needs a new agent (the provider refuses rather than no-oping).
 - **No plan-review card.** `exit_plan_mode` needs a DSH client to answer its review; from Paseo
   the agent presents the plan in the conversation.
 - **No live token deltas.** Assistant text is projected when the step commits, like the one-shot

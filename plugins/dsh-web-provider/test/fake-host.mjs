@@ -25,7 +25,7 @@ const sessions = new Map();
 function sessionOf(id) {
   let session = sessions.get(id);
   if (session === undefined) {
-    session = { follows: new Set(), planActive: false, turn: 0 };
+    session = { follows: new Set(), planActive: false, turn: 0, preset: "standard" };
     sessions.set(id, session);
   }
   return session;
@@ -62,6 +62,8 @@ function projections(session) {
     asOfSeq: 0,
     values: {
       title: null,
+      agentPreset: session.preset,
+      sessionListMetadata: { blank: session.turn === 0, lastPromptAt: null },
       plan: { active: session.planActive, pending: false },
       modelSelection: {
         lastUsed: { provider: "fake-provider", model: "fake-model" },
@@ -101,6 +103,14 @@ const COMMANDS = [
     name: "export",
     description: "Download this Session log as a ZIP archive",
   },
+];
+
+const PRESETS = [
+  { id: "standard", isDefault: true },
+  { id: "ptc" },
+  { id: "cordis" },
+  { id: "minimal" },
+  { id: "dsh-ops", name: "Ops", description: "Custom ops preset" },
 ];
 
 const MODEL_CATALOG = {
@@ -194,8 +204,18 @@ function dispatchSession(method, request, res, rpcId) {
   switch (method) {
     case "session/create": {
       const sessionId = request.sessionId ?? "session-fake-1";
-      sessionOf(sessionId);
-      ok(res, rpcId, { sessionId, agentPreset: "standard" });
+      const session = sessionOf(sessionId);
+      if (typeof request.agentPreset === "string") session.preset = request.agentPreset;
+      ok(res, rpcId, { sessionId, agentPreset: session.preset });
+      return;
+    }
+    case "agentPresets/list":
+      ok(res, rpcId, { presets: PRESETS });
+      return;
+    case "agentPresets/select": {
+      const session = sessionOf(request.agentId);
+      session.preset = request.agentPreset;
+      ok(res, rpcId, request.agentPreset);
       return;
     }
     case "session/modelCatalog":

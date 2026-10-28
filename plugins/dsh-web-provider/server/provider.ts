@@ -14,7 +14,7 @@ import {
   type ProviderRegistration,
   type ProviderSessionConfig,
 } from "@getpaseo/plugin/server/provider";
-import { catalogFromHost, modesFor, type CatalogValue } from "./internal/catalog.js";
+import { catalogFromHost, type CatalogValue } from "./internal/catalog.js";
 import { DshHost } from "./internal/host.js";
 import { Session } from "./internal/session.js";
 import { DshError } from "./internal/wire.js";
@@ -317,7 +317,7 @@ function optionsOf(config: ProviderSessionConfig): DshWebOptions {
 }
 
 function emptyCatalog(): ProviderCatalog {
-  return { models: [], modes: modesFor(false).modes, thinkingOptions: [] };
+  return { models: [], modes: [], thinkingOptions: [] };
 }
 
 function asError(error: unknown): { message: string; code?: string } {

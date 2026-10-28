@@ -9,11 +9,32 @@ Paseo daemon (provider `dsh-web`, installed side by side with the headless provi
 - `paseo run --provider dsh-web "/plan"` → agent idle, mode `plan`, no model turn;
   `paseo send "<id>" "/plan off"` → mode `default` — the host's command plane, not prose;
 - `paseo run --provider dsh-web "/goal Reply with exactly: goal-ok, then mark this goal
-  complete."` → the DSH session log records `goal/change create | phase active` with exactly
+complete."` → the DSH session log records `goal/change create | phase active` with exactly
   that objective, then the goal round ran (10,203 input / 1,341 output tokens) and
   `goal/change complete | phase complete`.
 
 Delivery: patch for the operator's Paseo fork; install is a directory plugin.
+
+### v2 — DSH agent presets as Paseo modes (2026-10-28)
+
+The host exposes its preset roster over the same API (`agentPresets/list`,
+`agentPresets/select {agentId, agentPreset}`), and `agentPresets/select` is a
+pre-first-turn action ("A Session whose log records the preset … keeps its
+composition"). The provider now:
+
+- maps the host's non-broken presets to Paseo modes (labels: host `name`, else the
+  DSH web UI mapping `cordis` → Creator; live roster measured: `standard=Standard,
+ptc=PTC, minimal=Minimal, cordis=Creator`);
+- moves plan mode from a mode to the `plan_mode` settings toggle, so it composes
+  with any preset;
+- switches presets only while the session is blank and refuses afterwards with
+  `PRESET_LOCKED` ("DSH fixes the agent preset at the session's first turn — start
+  a new agent to change it");
+- honours `config.mode` at creation as `agentPreset`.
+
+Verified live: roster listing, pre-first-turn switch to `ptc`, `plan_mode`
+true/false around `/plan`, and the post-turn refusal — 6 live checks green, 10
+unit tests green.
 Goal: goal-6d730275-6f89-4d03-afb3-caa4891a9f55.
 DDR: /tmp/dsh-ddr/2026-10-28-dsh-web-provider.ddr.yaml.
 
