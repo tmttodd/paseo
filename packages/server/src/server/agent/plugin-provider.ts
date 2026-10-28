@@ -938,6 +938,8 @@ interface PendingChild {
 
 class PluginAgentClient implements AgentClient {
   readonly provider: string;
+  /** The provider's own catalog resolves a default model, so a draft session needs none. */
+  readonly supportsDraftCommandsWithoutModel = true;
   private readonly runtime: ProviderRuntime;
   private readonly rootsBySession = new Map<string, PluginAgentSession>();
   private readonly pendingChildren: PendingChild[] = [];

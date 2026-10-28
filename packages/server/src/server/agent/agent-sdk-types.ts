@@ -748,6 +748,12 @@ export interface ResolveAgentDefaultModeInput {
 export interface AgentClient {
   readonly provider: AgentProvider;
   readonly capabilities: AgentCapabilityFlags;
+  /**
+   * Whether a draft command listing may create a throwaway session before the
+   * caller picked a model. Plugin providers resolve their own default model, so
+   * their session opens without one; CLI providers must not guess.
+   */
+  readonly supportsDraftCommandsWithoutModel?: boolean;
   createSession(
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,

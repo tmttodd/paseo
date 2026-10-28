@@ -14,10 +14,16 @@ import {
   type ProviderRegistration,
   type ProviderSessionConfig,
 } from "@getpaseo/plugin/server/provider";
-import { catalogFromHost, type CatalogValue } from "./internal/catalog.js";
+import {
+  catalogFromHost,
+  modesFromPresets,
+  presetsFromHost,
+  type CatalogValue,
+  type PresetEntry,
+} from "./internal/catalog.js";
 import { DshHost } from "./internal/host.js";
 import { Session } from "./internal/session.js";
-import { DshError } from "./internal/wire.js";
+import { DshError, type DshWire } from "./internal/wire.js";
 
 /**
  * DSH's native provider: one owned `dsh web` host, driven over the same wire the
@@ -184,8 +190,26 @@ function createConnection(
     if (catalog !== null) return catalog;
     const result = await target.wire.call("session/modelCatalog", {});
     if (!result.ok) return null;
-    catalog = catalogFromHost(result.value);
+    const value = catalogFromHost(result.value);
+    if (value === null) return null;
+    // The agent presets are the provider's modes, and the create screen reads
+    // them from this catalog — not only from a session's config.
+    const presets = await presetsOfHost(target.wire);
+    if (presets.length > 0) {
+      const { modes, mode } = modesFromPresets(presets, undefined);
+      value.catalog = {
+        ...value.catalog,
+        modes,
+        ...(mode === undefined ? {} : { defaultMode: mode }),
+      };
+    }
+    catalog = value;
     return catalog;
+  }
+
+  async function presetsOfHost(wire: DshWire): Promise<PresetEntry[]> {
+    const result = await wire.call("agentPresets/list", {});
+    return result.ok ? presetsFromHost(result.value) : [];
   }
 
   async function dispatch(input: ProviderInput): Promise<void> {

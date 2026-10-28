@@ -2078,6 +2078,49 @@ test("listDraftCommands uses explicit model config without default model fetchin
   ]);
 });
 
+test("listDraftCommands lists plugin-provider commands before a model is chosen", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-draft-commands-"));
+  const storagePath = join(workdir, "agents");
+  const storage = new AgentStorage(storagePath, logger);
+  const draftCommand: AgentSlashCommand = {
+    name: "goal",
+    description: "Set or view the goal",
+    argumentHint: "[<objective>|clear]",
+    kind: "command",
+  };
+  class PluginDraftCommandSession extends TestAgentSession {
+    override async listCommands(): Promise<AgentSlashCommand[]> {
+      return [draftCommand];
+    }
+  }
+  class PluginDraftCommandClient extends TestAgentClient {
+    readonly supportsDraftCommandsWithoutModel = true;
+    createSessionCalls = 0;
+
+    override async isAvailable(): Promise<boolean> {
+      return true;
+    }
+
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      this.createSessionCalls += 1;
+      return new PluginDraftCommandSession(config);
+    }
+  }
+  const client = new PluginDraftCommandClient();
+  const manager = new AgentManager({
+    clients: {
+      "dsh-web": client,
+    },
+    registry: storage,
+    logger,
+  });
+
+  const commands = await manager.listDraftCommands({ provider: "dsh-web", cwd: workdir });
+
+  expect(commands).toEqual([draftCommand]);
+  expect(client.createSessionCalls).toBe(1);
+});
+
 test("listDraftFeatures does not start a fallback session without a model", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-draft-features-"));
   const storagePath = join(workdir, "agents");

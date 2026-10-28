@@ -155,6 +155,15 @@ describe("dsh-web provider", () => {
     ]);
     expect(catalog.catalog.defaultModel).toBe("fake-provider/fake-model");
     expect(catalog.catalog.thinkingOptions?.map((option) => option.id)).toEqual(["low", "high"]);
+    // The create screen reads modes from the catalog, not only from a session.
+    expect(catalog.catalog.modes.map((mode) => mode.id)).toEqual([
+      "standard",
+      "ptc",
+      "cordis",
+      "minimal",
+      "dsh-ops",
+    ]);
+    expect(catalog.catalog.defaultMode).toBe("standard");
   });
 
   it("opens a session in the fixed event order with the host's command list", async () => {
