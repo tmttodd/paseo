@@ -1,0 +1,6 @@
+{
+  "id": "dsh-web-provider",
+  "name": "DSH (native)",
+  "description": "Drives a local dsh web host: native /goal, /plan and the host's own command list",
+  "requirements": { "paseo": ">=0.13.0" }
+}
