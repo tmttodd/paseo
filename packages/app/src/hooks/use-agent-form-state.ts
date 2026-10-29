@@ -445,9 +445,11 @@ export function useAgentFormState(options: UseAgentFormStateOptions): UseAgentFo
     [refreshSnapshot],
   );
 
+  // The draft composer has no push subscription of its own; the snapshot is
+  // cached with an infinite stale time, so opening the picker must ask again.
   const refetchProviderModelsIfStale = useCallback(() => {
-    refetchSnapshotIfStale(formState.provider);
-  }, [formState.provider, refetchSnapshotIfStale]);
+    void refreshSnapshot();
+  }, [refreshSnapshot]);
 
   const persistFormPreferences = useCallback(async () => {
     if (!formState.provider) {
