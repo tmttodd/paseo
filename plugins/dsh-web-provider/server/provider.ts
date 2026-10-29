@@ -157,7 +157,17 @@ function createConnection(
     return file;
   }
 
-  async function ensureHost(options: DshWebOptions): Promise<DshHost> {
+  let hostStart: Promise<DshHost> | undefined;
+
+  /** Single-flight: the eager warm and the first request must share one boot. */
+  function ensureHost(options: DshWebOptions): Promise<DshHost> {
+    hostStart ??= ensureHostOnce(options).finally(() => {
+      hostStart = undefined;
+    });
+    return hostStart;
+  }
+
+  async function ensureHostOnce(options: DshWebOptions): Promise<DshHost> {
     const profile = options.profile ?? "web";
     if (host !== undefined) {
       if (hostProfile !== profile && sessions.size > 0) {
@@ -385,6 +395,19 @@ function createConnection(
         throw new DshError(`Unsupported DSH operation: ${input.type}`, "UNSUPPORTED_OPERATION");
     }
   }
+
+  // The create screen reads models from the provider snapshot, which warms
+  // lazily per workspace. Booting the host now means the first snapshot for a
+  // new workspace finds the catalog cached instead of showing a model-less
+  // provider while a host boots.
+  void (async () => {
+    try {
+      const started = await ensureHost({});
+      await loadCatalog(started);
+    } catch {
+      // The lazy path retries on the next catalog request.
+    }
+  })();
 
   function sessionOf(id: string): Session {
     const found = sessions.get(id);
