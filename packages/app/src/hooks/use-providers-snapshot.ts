@@ -124,7 +124,9 @@ export function useProvidersSnapshot(
         void queryClient.refetchQueries({ queryKey, type: "active" });
         return;
       }
-      void queryClient.refetchQueries({ queryKey, type: "active", stale: true });
+      // The snapshot is cached with an infinite stale time, so opening a provider
+      // picker is the only cheap moment to notice a provider that appeared later.
+      void queryClient.refetchQueries({ queryKey, type: "active" });
     },
     [queryClient, queryKey, snapshotQuery.data?.entries],
   );
