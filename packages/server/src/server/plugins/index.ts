@@ -297,8 +297,9 @@ export class PluginService {
     if (reference.kind === "directory") {
       const directory = path.resolve(expandTilde(reference.source));
       const info = await stat(directory).catch(() => null);
-      if (!info?.isDirectory()) throw new Error(`Plugin directory does not exist: ${directory}`);
-      if (input.ref) throw new Error("Plugin --ref is only valid for Git sources");
+      if (!info?.isDirectory())
+        throw new RequestOutcomeError(`Plugin directory does not exist: ${directory}`);
+      if (input.ref) throw new RequestOutcomeError("Plugin --ref is only valid for Git sources");
       const pluginDirectory = resolveLocalPluginPath(directory, reference.pluginPath);
       return this.installDirectory({ path: pluginDirectory, id: input.id });
     }
@@ -367,7 +368,9 @@ export class PluginService {
 
   // COMPAT(plugin-immediate-update): added in v0.8.0; remove after 2027-03-16 when clients use reviewed targets.
   async updateSources(_pluginId?: string): Promise<PluginSourceUpdateItem[]> {
-    throw new Error("Update the client to review plugin updates before applying them.");
+    throw new RequestOutcomeError(
+      "Update the client to review plugin updates before applying them.",
+    );
   }
 
   async previewUpdates(input: {
@@ -375,7 +378,7 @@ export class PluginService {
     target?: PluginUpdateSelection;
   }): Promise<PluginUpdatePreview[]> {
     if (input.target && !input.pluginId)
-      throw new Error("An explicit update target requires one plugin ID");
+      throw new RequestOutcomeError("An explicit update target requires one plugin ID");
     const sources = this.configStore.get().plugins ?? {};
     const ids = input.pluginId ? [input.pluginId] : Object.keys(sources).sort();
     return Promise.all(
@@ -420,7 +423,7 @@ export class PluginService {
     return this.enqueue(async () => {
       const source = this.requireEnabledSource(pluginId);
       if (this.configStore.get().pluginsEnabled !== true) {
-        throw new Error("Plugins are globally disabled");
+        throw new RequestOutcomeError("Plugins are globally disabled");
       }
       this.errors.delete(pluginId);
       await this.stopPlugin(pluginId);
@@ -779,7 +782,7 @@ export class PluginService {
   private requireSource(pluginId: string): PluginSource {
     PluginIdSchema.parse(pluginId);
     const source = this.configStore.get().plugins?.[pluginId];
-    if (!source) throw new Error(`Plugin is not configured: ${pluginId}`);
+    if (!source) throw new RequestOutcomeError(`Plugin is not configured: ${pluginId}`);
     return source;
   }
 

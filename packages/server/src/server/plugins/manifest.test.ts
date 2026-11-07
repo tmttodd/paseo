@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { readPluginManifest } from "./manifest.js";
+import { RequestOutcomeError } from "../request-outcome.js";
 
 const directories: string[] = [];
 const examplesDirectory = fileURLToPath(
@@ -142,6 +143,13 @@ describe("plugin manifest", () => {
       await expect(readPluginManifest(directory)).resolves.toEqual({ id: "described" });
     },
   );
+
+  it("reports a missing manifest as a request outcome", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-missing-"));
+    directories.push(directory);
+
+    await expect(readPluginManifest(directory)).rejects.toBeInstanceOf(RequestOutcomeError);
+  });
 
   it("accepts only non-empty argv arrays for build commands", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));

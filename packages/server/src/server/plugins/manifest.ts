@@ -3,6 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { PluginIdSchema, PluginRequirementsSchema } from "@getpaseo/protocol/messages";
 import { validatePluginRequirements } from "@getpaseo/protocol/plugin-requirements";
+import { RequestOutcomeError } from "../request-outcome.js";
 
 const MANIFEST_FILENAME = "paseo-plugin.json";
 const PluginBuildCommandSchema = z
@@ -41,7 +42,7 @@ export type PluginManifest = z.infer<typeof PluginManifestSchema>;
 export async function readPluginManifest(directory: string): Promise<PluginManifest> {
   const manifestPath = path.join(directory, MANIFEST_FILENAME);
   const info = await stat(manifestPath).catch(() => null);
-  if (!info?.isFile()) throw new Error(`Plugin manifest is missing: ${manifestPath}`);
+  if (!info?.isFile()) throw new RequestOutcomeError(`Plugin manifest is missing: ${manifestPath}`);
   const manifest = PluginManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
   validatePluginRequirements(manifest.requirements);
   return manifest;
