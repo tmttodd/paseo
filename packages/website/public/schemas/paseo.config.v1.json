@@ -98,6 +98,12 @@
         "autoArchiveAfterMerge": {
           "type": "boolean"
         },
+        "autoArchiveMissingProjectAfterMs": {
+          "description": "How long a project root may stay missing before reconciliation archives its workspaces. Defaults to 21600000 (6 hours); raise it for slow or flaky mounts.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
         "enableTerminalAgentHooks": {
           "type": "boolean"
         },

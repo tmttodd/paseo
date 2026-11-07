@@ -81,6 +81,13 @@ export function requirePlannedWorkspaceServicePort(
   return port;
 }
 
+/** True while a workspace still holds a service port plan, settled or being built. */
+export function hasWorkspaceServicePortPlan(workspaceId: string): boolean {
+  return (
+    workspaceServicePortPlans.has(workspaceId) || pendingWorkspaceServicePortPlans.has(workspaceId)
+  );
+}
+
 export function releaseWorkspaceServicePortPlan(workspaceId: string): void {
   const pendingToken = pendingWorkspaceServicePortPlanTokens.get(workspaceId);
   if (pendingToken) pendingToken.isReleased = true;

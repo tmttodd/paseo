@@ -229,6 +229,50 @@ function createTempGitRepo(prefix: string): string {
   return dir;
 }
 
+/**
+ * Seeds an active project whose root sits on a volume that is not mounted. Every
+ * workspace lives under that root, so none of them resolves.
+ */
+function seedUnmountedProject(
+  registries: ReturnType<typeof createTestRegistries>,
+  input: { mountParent: string; projectId?: string; workspaceIds?: string[] },
+): { projectId: string; projectRoot: string; workspaceCwds: string[] } {
+  const projectId = input.projectId ?? "p1";
+  const workspaceIds = input.workspaceIds ?? ["w1"];
+  const projectRoot = path.join(input.mountParent, "ExternalSSD", "repo");
+  const workspaceCwds = workspaceIds.map((workspaceId, index) =>
+    index === 0 ? projectRoot : path.join(projectRoot, workspaceId),
+  );
+
+  registries.projects.set(
+    projectId,
+    createPersistedProjectRecord({
+      projectId,
+      rootPath: projectRoot,
+      kind: "non_git",
+      displayName: "repo",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }),
+  );
+  workspaceIds.forEach((workspaceId, index) => {
+    registries.workspaces.set(
+      workspaceId,
+      createPersistedWorkspaceRecord({
+        workspaceId,
+        projectId,
+        cwd: workspaceCwds[index]!,
+        kind: "directory",
+        displayName: workspaceId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+  });
+
+  return { projectId, projectRoot, workspaceCwds };
+}
+
 const timestamp = "2025-01-01T00:00:00.000Z";
 
 describe("WorkspaceReconciliationService", () => {
@@ -695,6 +739,205 @@ describe("WorkspaceReconciliationService", () => {
 
     expect(result.changesApplied).toEqual([]);
     expect(workspaces.get("w1")?.archivedAt).toBeNull();
+  });
+
+  test("archives a project's workspaces once its root stays missing past the window", async () => {
+    const mountParent = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-window-")));
+    tempDirs.push(mountParent);
+    const registries = createTestRegistries();
+    const { projectId, workspaceCwds } = seedUnmountedProject(registries, { mountParent });
+    let clockNow = 0;
+    const service = new WorkspaceReconciliationService({
+      projectRegistry: registries.projectRegistry,
+      workspaceRegistry: registries.workspaceRegistry,
+      logger: createTestLogger(),
+      autoArchiveMissingProjectAfterMs: 60_000,
+      now: () => clockNow,
+      isWorkspaceInUse: () => false,
+    });
+
+    expect((await service.runOnce()).changesApplied).toEqual([]);
+
+    clockNow = 59_999;
+    expect((await service.runOnce()).changesApplied).toEqual([]);
+
+    clockNow = 60_000;
+    const result = await service.runOnce();
+
+    expect(result.changesApplied).toEqual([
+      {
+        kind: "workspace_archived",
+        workspaceId: "w1",
+        directory: workspaceCwds[0],
+        reason: "project_directory_missing",
+      },
+    ]);
+    expect(registries.workspaces.get("w1")?.archivedAt).toEqual(expect.any(String));
+    // The project record stays active: nothing can unarchive a project.
+    expect(registries.projects.get(projectId)?.archivedAt).toBeNull();
+  });
+
+  test("restarts the missing-root window when the project root comes back", async () => {
+    const parent = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-window-reset-")));
+    tempDirs.push(parent);
+    const projectRoot = path.join(parent, "repo");
+    const registries = createTestRegistries();
+    registries.projects.set(
+      "p1",
+      createPersistedProjectRecord({
+        projectId: "p1",
+        rootPath: projectRoot,
+        kind: "non_git",
+        displayName: "repo",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+    registries.workspaces.set(
+      "w1",
+      createPersistedWorkspaceRecord({
+        workspaceId: "w1",
+        projectId: "p1",
+        cwd: projectRoot,
+        kind: "directory",
+        displayName: "repo",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+
+    let clockNow = 0;
+    const service = new WorkspaceReconciliationService({
+      projectRegistry: registries.projectRegistry,
+      workspaceRegistry: registries.workspaceRegistry,
+      logger: createTestLogger(),
+      autoArchiveMissingProjectAfterMs: 60_000,
+      now: () => clockNow,
+      isWorkspaceInUse: () => false,
+    });
+
+    expect((await service.runOnce()).changesApplied).toEqual([]);
+
+    mkdirSync(projectRoot);
+    clockNow = 30_000;
+    await service.runOnce();
+    rmSync(projectRoot, { recursive: true, force: true });
+
+    // 60s after the first sighting, but only 30s since the root came back and left.
+    clockNow = 60_000;
+    const result = await service.runOnce();
+
+    expect(result.changesApplied.filter((change) => change.kind === "workspace_archived")).toEqual(
+      [],
+    );
+    expect(registries.workspaces.get("w1")?.archivedAt).toBeNull();
+  });
+
+  test("leaves a project alone while one of its workspaces still has a directory", async () => {
+    const mountParent = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-partial-")));
+    tempDirs.push(mountParent);
+    const survivingDir = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-survivor-")));
+    tempDirs.push(survivingDir);
+    const registries = createTestRegistries();
+    seedUnmountedProject(registries, { mountParent, workspaceIds: ["w1", "w2"] });
+    const survivor = registries.workspaces.get("w2");
+    expect(survivor).toBeDefined();
+    registries.workspaces.set("w2", { ...survivor!, cwd: survivingDir });
+
+    let clockNow = 0;
+    const service = new WorkspaceReconciliationService({
+      projectRegistry: registries.projectRegistry,
+      workspaceRegistry: registries.workspaceRegistry,
+      logger: createTestLogger(),
+      autoArchiveMissingProjectAfterMs: 1_000,
+      now: () => clockNow,
+      isWorkspaceInUse: () => false,
+    });
+
+    await service.runOnce();
+    clockNow = 5_000;
+    const result = await service.runOnce();
+
+    expect(result.changesApplied.filter((change) => change.kind === "workspace_archived")).toEqual(
+      [],
+    );
+    expect(registries.workspaces.get("w1")?.archivedAt).toBeNull();
+    expect(registries.workspaces.get("w2")?.archivedAt).toBeNull();
+  });
+
+  test("does not archive a project while one of its workspaces is in use", async () => {
+    const mountParent = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-in-use-")));
+    tempDirs.push(mountParent);
+    const registries = createTestRegistries();
+    const { workspaceCwds } = seedUnmountedProject(registries, { mountParent });
+    let inUse = true;
+    let clockNow = 0;
+    const service = new WorkspaceReconciliationService({
+      projectRegistry: registries.projectRegistry,
+      workspaceRegistry: registries.workspaceRegistry,
+      logger: createTestLogger(),
+      autoArchiveMissingProjectAfterMs: 1_000,
+      now: () => clockNow,
+      isWorkspaceInUse: () => inUse,
+    });
+
+    await service.runOnce();
+    clockNow = 5_000;
+    expect((await service.runOnce()).changesApplied).toEqual([]);
+    expect(registries.workspaces.get("w1")?.archivedAt).toBeNull();
+
+    // The hold is the live reference, not the window: release it and the next pass archives.
+    inUse = false;
+    expect((await service.runOnce()).changesApplied).toEqual([
+      {
+        kind: "workspace_archived",
+        workspaceId: "w1",
+        directory: workspaceCwds[0],
+        reason: "project_directory_missing",
+      },
+    ]);
+  });
+
+  test("does not archive a project that holds a pinned workspace", async () => {
+    const mountParent = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-pinned-")));
+    tempDirs.push(mountParent);
+    const registries = createTestRegistries();
+    seedUnmountedProject(registries, { mountParent });
+    const pinned = registries.workspaces.get("w1");
+    expect(pinned).toBeDefined();
+    registries.workspaces.set("w1", { ...pinned!, pinnedAt: timestamp });
+
+    let clockNow = 0;
+    const service = new WorkspaceReconciliationService({
+      projectRegistry: registries.projectRegistry,
+      workspaceRegistry: registries.workspaceRegistry,
+      logger: createTestLogger(),
+      autoArchiveMissingProjectAfterMs: 1_000,
+      now: () => clockNow,
+      isWorkspaceInUse: () => false,
+    });
+
+    await service.runOnce();
+    clockNow = 5_000;
+    expect((await service.runOnce()).changesApplied).toEqual([]);
+    expect(registries.workspaces.get("w1")?.archivedAt).toBeNull();
+  });
+
+  test("withholds the archive when no live-reference probe is wired", async () => {
+    const mountParent = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-no-probe-")));
+    tempDirs.push(mountParent);
+    const registries = createTestRegistries();
+    seedUnmountedProject(registries, { mountParent });
+
+    const service = new WorkspaceReconciliationService({
+      projectRegistry: registries.projectRegistry,
+      workspaceRegistry: registries.workspaceRegistry,
+      logger: createTestLogger(),
+      autoArchiveMissingProjectAfterMs: 0,
+    });
+
+    expect((await service.runOnce()).changesApplied).toEqual([]);
+    expect(registries.workspaces.get("w1")?.archivedAt).toBeNull();
   });
 
   test("keeps a project active after all its workspaces are archived", async () => {
