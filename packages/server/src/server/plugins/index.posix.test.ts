@@ -181,6 +181,82 @@ function createPluginSelectivePausedRuntime(pausedPluginId: string) {
 }
 
 describe("PluginService", () => {
+  it("reports a missing plugin directory as a request outcome", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const service = bindTestSessionHost(
+      new PluginService(pino({ level: "silent" }), createStore(home), "0.4.0"),
+    );
+
+    await expect(
+      service.installSource({ source: path.join(home, "not-a-directory") }),
+    ).rejects.toBeInstanceOf(RequestOutcomeError);
+  });
+
+  it("reports a ref on a directory source as a request outcome", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-"));
+    roots.push(directory);
+    const service = bindTestSessionHost(
+      new PluginService(pino({ level: "silent" }), createStore(home), "0.4.0"),
+    );
+
+    await expect(service.installSource({ source: directory, ref: "main" })).rejects.toBeInstanceOf(
+      RequestOutcomeError,
+    );
+  });
+
+  it("reports the retired immediate-update path as a request outcome", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const service = bindTestSessionHost(
+      new PluginService(pino({ level: "silent" }), createStore(home), "0.4.0"),
+    );
+
+    await expect(service.updateSources()).rejects.toBeInstanceOf(RequestOutcomeError);
+  });
+
+  it("reports an update target without a plugin id as a request outcome", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const service = bindTestSessionHost(
+      new PluginService(pino({ level: "silent" }), createStore(home), "0.4.0"),
+    );
+
+    await expect(
+      service.previewUpdates({ target: { kind: "git", ref: "main" } }),
+    ).rejects.toBeInstanceOf(RequestOutcomeError);
+  });
+
+  it("reports a globally disabled plugin service as a request outcome", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-"));
+    roots.push(directory);
+    const store = createStore(home, {
+      configured: { source: "directory", path: directory, enabled: true },
+    });
+    store.patch({ pluginsEnabled: false });
+    const service = bindTestSessionHost(
+      new PluginService(pino({ level: "silent" }), store, "0.4.0"),
+    );
+
+    await expect(service.reloadPlugin("configured")).rejects.toBeInstanceOf(RequestOutcomeError);
+  });
+
+  it("reports an unconfigured plugin as a request outcome", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const service = bindTestSessionHost(
+      new PluginService(pino({ level: "silent" }), createStore(home), "0.4.0"),
+    );
+
+    await expect(service.statusSources("missing-plugin")).rejects.toBeInstanceOf(
+      RequestOutcomeError,
+    );
+  });
+
   it("reports a reserved builtin id on installSource as a request outcome", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
     roots.push(home);
