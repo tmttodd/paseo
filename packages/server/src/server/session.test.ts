@@ -1620,6 +1620,42 @@ describe("request outcome logging", () => {
     );
   });
 
+  test("reports a permission failure once and still answers the caller", async () => {
+    const { logger, records } = createRecordingLogger();
+    const messages: unknown[] = [];
+    const session = createSessionForTest({
+      messages,
+      logger,
+      agentManager: {
+        respondToPermission: vi.fn().mockRejectedValue(new RequestOutcomeError("Agent is gone")),
+      },
+    });
+
+    await session.handleMessage({
+      type: "agent_permission_response",
+      agentId: "agent-1",
+      requestId: "perm-1",
+      response: { behavior: "allow" },
+    });
+
+    const logged = records.filter((record) => record.level === 40 || record.level === 50);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({
+      level: 40,
+      msg: "Request could not be answered",
+      requestType: "agent_permission_response",
+    });
+    expect(
+      (messages as Array<{ type: string }>).filter((message) => message.type === "activity_log"),
+    ).toHaveLength(1);
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "rpc_error",
+        payload: expect.objectContaining({ requestId: "perm-1" }),
+      }),
+    );
+  });
+
   test("logs a handler that answers its own failure below error", async () => {
     const { logger, records } = createRecordingLogger();
     const session = createSessionForTest({
