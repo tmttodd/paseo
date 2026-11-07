@@ -35,12 +35,15 @@ import type { StoredAgentRecord } from "./agent/agent-storage.js";
 import type { AgentManagerEvent } from "./agent/agent-manager.js";
 import type { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { WorkspaceLabelError, type WorkspaceLabelService } from "./workspace-labels/index.js";
+import { RequestOutcomeError } from "./request-outcome.js";
 import { createPersistedProjectRecord } from "./workspace-registry.js";
 import { deriveProjectKey } from "./project-key.js";
 import type { SessionOptions } from "./session.js";
 import type { SessionInboundMessage, SessionOutboundMessage } from "./messages.js";
 import {
   asSessionInternals as asSessionInternalsHelper,
+  asPluginRuntime,
+  asSessionLogger,
   asAgentManager,
   asAgentStorage,
   asDownloadTokenStore,
@@ -338,10 +341,11 @@ interface SessionForTestOptions {
   pluginRuntime?: SessionOptions["pluginRuntime"];
   orchestrationSkills?: SessionOptions["orchestrationSkills"];
   workspaceLabelService?: WorkspaceLabelService;
+  logger?: SessionOptions["logger"];
 }
 
 function createSessionForTest(options: SessionForTestOptions = {}): Session {
-  const logger = pino({ level: "silent" });
+  const logger = options.logger ?? pino({ level: "silent" });
   const github = options.github ?? {
     invalidate: vi.fn(),
     searchIssuesAndPrs: vi.fn(),
@@ -1512,6 +1516,128 @@ describe("plugin timeline append RPC", () => {
         }),
       }),
     );
+  });
+});
+
+interface RecordedLog {
+  level: number;
+  msg: string | undefined;
+  requestType?: string;
+}
+
+function createRecordingLogger(): {
+  logger: SessionOptions["logger"];
+  records: RecordedLog[];
+} {
+  const records: RecordedLog[] = [];
+  const record = (level: number) => (details: unknown, msg?: string) => {
+    const requestType = (details as { requestType?: string } | null)?.requestType;
+    records.push({ level, msg, ...(requestType ? { requestType } : {}) });
+  };
+  const logger: SessionOptions["logger"] = asSessionLogger({
+    trace: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: record(40),
+    error: record(50),
+    child: () => logger,
+  });
+  return { logger, records };
+}
+
+describe("request outcome logging", () => {
+  test("logs a request outcome as a warning, not a daemon error", async () => {
+    const { logger, records } = createRecordingLogger();
+    const messages: unknown[] = [];
+    const session = createSessionForTest({
+      messages,
+      logger,
+      pluginRuntime: asPluginRuntime({
+        invokePluginRpc: vi
+          .fn()
+          .mockRejectedValue(
+            new RequestOutcomeError("[doc:workspace_not_found] Workspace wks_1 has no directory"),
+          ),
+      }),
+    });
+
+    await session.handleMessage({
+      type: "plugin.rpc.invoke.request",
+      requestId: "doc-1",
+      pluginId: "doc-viewer",
+      method: "doc.render",
+      input: { workspaceId: "wks_1" },
+    });
+
+    expect(records).toContainEqual({
+      level: 40,
+      msg: "Request could not be answered",
+      requestType: "plugin.rpc.invoke.request",
+    });
+    expect(records.filter((record) => record.level === 50)).toEqual([]);
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "rpc_error",
+        payload: expect.objectContaining({
+          requestId: "doc-1",
+          error: "Request failed: [doc:workspace_not_found] Workspace wks_1 has no directory",
+        }),
+      }),
+    );
+  });
+
+  test("logs a refresh for an unknown agent as a request outcome", async () => {
+    const { logger, records } = createRecordingLogger();
+    const messages: unknown[] = [];
+    const agentId = "00000000-0000-4000-8000-000000000901";
+    const session = createSessionForTest({
+      messages,
+      logger,
+      agentManager: {
+        getAgent: vi.fn(() => undefined),
+        unarchiveSnapshot: vi.fn().mockResolvedValue(false),
+      },
+      agentStorage: { get: vi.fn().mockResolvedValue(undefined) },
+    });
+
+    await session.handleMessage({ type: "refresh_agent_request", agentId, requestId: "refresh-1" });
+
+    expect(records).toContainEqual({
+      level: 40,
+      msg: "Request could not be answered",
+      requestType: "refresh_agent_request",
+    });
+    expect(records.filter((record) => record.level === 50)).toEqual([]);
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "rpc_error",
+        payload: expect.objectContaining({
+          requestId: "refresh-1",
+          error: `Agent not found: ${agentId}`,
+          code: "agent_refresh_failed",
+        }),
+      }),
+    );
+  });
+
+  test("still logs an unexpected handler failure as an error", async () => {
+    const { logger, records } = createRecordingLogger();
+    const session = createSessionForTest({
+      logger,
+      pluginRuntime: asPluginRuntime({
+        invokePluginRpc: vi.fn().mockRejectedValue(new Error("plugin runtime bug")),
+      }),
+    });
+
+    await session.handleMessage({
+      type: "plugin.rpc.invoke.request",
+      requestId: "doc-2",
+      pluginId: "doc-viewer",
+      method: "doc.render",
+      input: {},
+    });
+
+    expect(records).toContainEqual({ level: 50, msg: "Error handling message" });
   });
 });
 

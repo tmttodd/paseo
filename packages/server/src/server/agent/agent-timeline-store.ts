@@ -163,6 +163,8 @@ export class InMemoryAgentTimelineStore {
   private requireState(agentId: string): AgentTimelineState {
     const state = this.states.get(agentId);
     if (!state) {
+      // Not a request outcome: every caller reaches this only after AgentManager has already
+      // confirmed the agent exists, so a missing state means a live agent lost its timeline.
       throw new Error(`Unknown agent '${agentId}'`);
     }
     return state;

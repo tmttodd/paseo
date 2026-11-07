@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentStreamEvent } from "../agent/agent-sdk-types.js";
 import { PluginAgentClientRegistry } from "../agent/plugin-provider.js";
 import { PluginRuntime } from "./runtime.js";
+import { RequestOutcomeError } from "../request-outcome.js";
 import type { PluginSessionSocket } from "./session-socket.js";
 
 const temporaryDirectories: string[] = [];
@@ -1036,6 +1037,74 @@ export default function contribute(server: any) { server.registerProvider(provid
     await runtime.stopPluginById("pending");
 
     await rejection;
+  });
+
+  it("marks a plugin RPC rejection as a request error, not a daemon failure", async () => {
+    const directory = await createPlugin(
+      "rejecting",
+      `export default function contribute(plugin: unknown) { void plugin; return () => undefined; }`,
+    );
+    const child = createReloadChild("rejecting", [], ["known"]);
+    const sent: Array<{ type: string; requestId?: string }> = [];
+    const originalSend = child.send.bind(child);
+    child.send = ((
+      message: { type: string; requestId?: string },
+      callback?: (error: Error | null) => void,
+    ) => {
+      sent.push(message);
+      return originalSend(message, callback);
+    }) as typeof child.send;
+    const runtime = createTestRuntime({ spawnChild: () => child });
+    await runtime.startPlugin("rejecting", directory);
+
+    const rejection = runtime.invoke("rejecting", "known", {});
+    const requestId = sent.find((message) => message.type === "invoke")?.requestId;
+    expect(requestId).toBeTruthy();
+    child.emitMessage({ type: "error", requestId, error: "Plugin handler failed: boom" });
+
+    await expect(rejection).rejects.toBeInstanceOf(RequestOutcomeError);
+    await expect(rejection).rejects.toThrow("Plugin handler failed: boom");
+    await runtime.stopAll();
+  });
+
+  it("marks a request to an unavailable plugin as a request error", async () => {
+    const runtime = createTestRuntime();
+
+    await expect(runtime.invoke("ghost-plugin", "anything", {})).rejects.toBeInstanceOf(
+      RequestOutcomeError,
+    );
+  });
+
+  it("marks a provider the plugin does not contribute as a request error", async () => {
+    const directory = await createPlugin(
+      "no-providers",
+      `export default function contribute(plugin: unknown) { void plugin; return () => undefined; }`,
+    );
+    const runtime = createTestRuntime();
+    await runtime.startPlugin("no-providers", directory);
+
+    await expect(
+      runtime.connectProvider("no-providers", "missing-provider", {
+        versions: [1],
+        capabilities: [],
+      }),
+    ).rejects.toBeInstanceOf(RequestOutcomeError);
+    await runtime.stopAll();
+  });
+
+  it("marks an RPC the plugin does not contribute as a request error", async () => {
+    const directory = await createPlugin(
+      "only-known",
+      `export default function contribute(plugin: unknown) { void plugin; return () => undefined; }`,
+    );
+    const child = createReloadChild("only-known", [], ["known"]);
+    const runtime = createTestRuntime({ spawnChild: () => child });
+    await runtime.startPlugin("only-known", directory);
+
+    await expect(runtime.invoke("only-known", "not-offered", {})).rejects.toBeInstanceOf(
+      RequestOutcomeError,
+    );
+    await runtime.stopAll();
   });
 
   it("waits for asynchronous plugin cleanup before stopping", async () => {

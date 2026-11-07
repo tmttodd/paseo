@@ -51,6 +51,12 @@ export function asAgentStorage(stub: {
   });
 }
 
+export function asPluginRuntime(stub: {
+  [K in keyof NonNullable<SessionOptions["pluginRuntime"]>]?: unknown;
+}): NonNullable<SessionOptions["pluginRuntime"]> {
+  return createStub<NonNullable<SessionOptions["pluginRuntime"]>>(stub);
+}
+
 export function asDownloadTokenStore(): SessionOptions["downloadTokenStore"] {
   return createStub<SessionOptions["downloadTokenStore"]>({});
 }

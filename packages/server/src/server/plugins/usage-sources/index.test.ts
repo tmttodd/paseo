@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { UsageSourceRegistry } from "./index.js";
+import { RequestOutcomeError } from "../../request-outcome.js";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -416,6 +417,9 @@ test("session discovery reuses accounts, separates launches, and retains live ag
   sessions.delete("two");
   expect((await registry.listReports()).map((r) => r.id)).toEqual(["claude:default", "claude:new"]);
   await expect(registry.listReports({ agentId: "missing" })).rejects.toThrow("Unknown agent");
+  await expect(registry.listReports({ agentId: "missing" })).rejects.toBeInstanceOf(
+    RequestOutcomeError,
+  );
   await expect(registry.listReports({ agentId: "one", reportIds: [] })).rejects.toThrow("agentId");
 });
 
