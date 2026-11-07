@@ -7183,6 +7183,7 @@ test("wire snapshot callers own expansion and receive hash references unchanged"
           provider: "codex",
           enabled: true,
           status: "ready",
+          supportsExactMcpPreapproval: false,
           models: [{ id: "astra", label: "Astra" }],
         },
       ],
