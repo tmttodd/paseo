@@ -200,6 +200,10 @@ class ObservedPlacements {
       clock: this.clock,
       debounceMs: DEBOUNCE_MS,
       rescanIntervalMs: RESCAN_INTERVAL_MS,
+      // The archive is withheld while anything live claims a workspace, so this harness
+      // states that every workspace is free; the gate itself is covered by the
+      // live-claim tests in workspace-reconciliation-service.test.ts.
+      isWorkspaceInUse: () => false,
       onProjectUpdate: (update) => {
         this.projectEvents.push(update);
         this.lifecycleEvents.push(

@@ -197,7 +197,11 @@ import type {
 } from "./agent/provider-launch-config.js";
 import { loadPersistedConfig, type PersistedConfig } from "./persisted-config.js";
 import { createServiceProxySubsystem, type ServiceProxySubsystem } from "./service-proxy.js";
-import { releaseWorkspaceServicePortPlan } from "./workspace-service-port-registry.js";
+import {
+  hasWorkspaceServicePortPlan,
+  releaseWorkspaceServicePortPlan,
+} from "./workspace-service-port-registry.js";
+import { createIsWorkspaceInUse } from "./workspace-in-use.js";
 import { ScriptHealthMonitor } from "./script-health-monitor.js";
 import { createScriptStatusEmitter } from "./script-status-projection.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
@@ -415,6 +419,7 @@ export interface PaseoDaemonConfig {
     maxProcessConcurrency: number;
   };
   autoArchiveAfterMerge?: boolean;
+  autoArchiveMissingProjectAfterMs?: number;
   enableTerminalAgentHooks?: boolean;
   appendSystemPrompt?: string;
   terminalProfiles?: TerminalProfile[];
@@ -1026,6 +1031,13 @@ export async function createPaseoDaemon(
     workspaceRegistry,
     logger,
     workspaceGitService,
+    autoArchiveMissingProjectAfterMs: config.autoArchiveMissingProjectAfterMs,
+    isWorkspaceInUse: createIsWorkspaceInUse({
+      agentManager,
+      terminalManager,
+      scriptRuntimeStore,
+      hasServicePortPlan: hasWorkspaceServicePortPlan,
+    }),
     onProjectUpdate: (update) => wsServer?.publishProjectUpdate(update),
     onWorkspaceArchived: teardownArchivedWorkspaceRuntime,
     onWorkspacesChanged: async (workspaceIds) => {

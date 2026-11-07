@@ -19,6 +19,7 @@ import { deriveProjectKey } from "./project-key.js";
 
 const DEFAULT_RESCAN_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_DEBOUNCE_MS = 100;
+const DEFAULT_AUTO_ARCHIVE_MISSING_PROJECT_AFTER_MS = 6 * 60 * 60_000;
 
 export type ProjectUpdate =
   | { kind: "upsert"; project: PersistedProjectRecord }
@@ -95,6 +96,20 @@ export interface WorkspaceReconciliationServiceOptions {
   clock?: ReconciliationClock;
   rescanIntervalMs?: number;
   debounceMs?: number;
+  /**
+   * How long a project root must stay missing before its workspaces are archived.
+   * A shifted mount and a deleted directory look identical in one observation, so
+   * the archive waits for the absence to persist. Defaults to six hours.
+   */
+  autoArchiveMissingProjectAfterMs?: number;
+  /**
+   * Reports whether anything still runs against a workspace, so the archive cannot
+   * strand an agent or terminal. Defaults to treating every workspace as in use:
+   * an unwired probe can withhold an archive, never cause one.
+   */
+  isWorkspaceInUse?: (workspaceId: string) => boolean | Promise<boolean>;
+  /** Time source for the archive window. Defaults to `Date.now`. */
+  now?: () => number;
 }
 
 interface ProjectReconciliationInput {
@@ -126,6 +141,11 @@ export class WorkspaceReconciliationService {
   private readonly clock: ReconciliationClock;
   private readonly rescanIntervalMs: number;
   private readonly debounceMs: number;
+  private readonly autoArchiveMissingProjectAfterMs: number;
+  private readonly isWorkspaceInUse: (workspaceId: string) => boolean | Promise<boolean>;
+  private readonly now: () => number;
+  /** First sighting of each missing project root, for the archive window. */
+  private readonly missingProjectSince = new Map<string, number>();
   private readonly watchers: Array<{ rootPath: string; watcher: ProjectRootWatcher }> = [];
   private unsubscribeRegistry: (() => void) | null = null;
   private rescanTimer: ReconciliationTimer | null = null;
@@ -149,6 +169,10 @@ export class WorkspaceReconciliationService {
     this.clock = options.clock ?? systemClock;
     this.rescanIntervalMs = options.rescanIntervalMs ?? DEFAULT_RESCAN_INTERVAL_MS;
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.autoArchiveMissingProjectAfterMs =
+      options.autoArchiveMissingProjectAfterMs ?? DEFAULT_AUTO_ARCHIVE_MISSING_PROJECT_AFTER_MS;
+    this.isWorkspaceInUse = options.isWorkspaceInUse ?? (() => true);
+    this.now = options.now ?? Date.now;
   }
 
   async start(): Promise<void> {
@@ -186,6 +210,7 @@ export class WorkspaceReconciliationService {
     if (this.debounceTimer) this.clock.clearTimeout(this.debounceTimer);
     for (const { watcher } of this.watchers) watcher.close();
     this.watchers.length = 0;
+    this.missingProjectSince.clear();
   }
 
   /** Reconciles mutable Git facts only; never archives missing records. */
@@ -244,27 +269,42 @@ export class WorkspaceReconciliationService {
       workspacesByProject.set(workspace.projectId, list);
     }
 
-    // 1. Archive workspaces whose directories no longer exist, but only when the
-    //    project they belong to is still reachable. A missing project root means the
-    //    whole location is unavailable - an unmounted volume, an offline share, a disk
-    //    that has not appeared yet - and absence there proves nothing about the
-    //    workspace. Projects already persist through that; their workspaces do too.
-    const missingWorkspaces = workspaceDirectoryStates
-      .filter(
-        ({ workspace, state }) =>
-          state === "missing" && reachableProjectIds.has(workspace.projectId),
-      )
-      .map(({ workspace }) => workspace);
+    // 1. Archive workspaces whose directories no longer exist. A missing directory
+    //    under a reachable project root is a deleted workspace. A missing directory
+    //    under a missing root proves nothing yet - an unmounted volume, an offline
+    //    share, a disk that has not appeared - so that case waits for the absence to
+    //    persist past the archive window (see resolveAbandonedProjects).
+    const abandonedProjectIds = await this.resolveAbandonedProjects({
+      activeProjects,
+      reachableProjectIds,
+      workspaceDirectoryStates,
+    });
+    const archiveCandidates = workspaceDirectoryStates.filter(
+      ({ workspace, state }) =>
+        state === "missing" &&
+        (reachableProjectIds.has(workspace.projectId) ||
+          abandonedProjectIds.has(workspace.projectId)),
+    );
+    // Nothing live may be stranded by either archive reason: this path drops only the
+    // workspace's script runtime and port plan, never its agents or terminals. A
+    // workspace still claimed by a running agent, a terminal, a script or a service
+    // port plan keeps its record and is retried on a later pass, once it is free.
+    const missingWorkspaces: PersistedWorkspaceRecord[] = [];
+    for (const { workspace } of archiveCandidates) {
+      if (await this.isWorkspaceInUse(workspace.workspaceId)) continue;
+      missingWorkspaces.push(workspace);
+    }
     await Promise.all(
       missingWorkspaces.map(async (workspace) => {
         const timestamp = new Date().toISOString();
+        const reachableProject = reachableProjectIds.has(workspace.projectId);
         await this.workspaceRegistry.archive(workspace.workspaceId, timestamp);
         await this.onWorkspaceArchived?.(workspace.workspaceId);
         changes.push({
           kind: "workspace_archived",
           workspaceId: workspace.workspaceId,
           directory: workspace.cwd,
-          reason: "directory_missing",
+          reason: reachableProject ? "directory_missing" : "project_directory_missing",
         });
 
         // Update the in-memory list for the project orphan check below
@@ -302,6 +342,67 @@ export class WorkspaceReconciliationService {
   /** Runs the boot-time convergence path and publishes every affected workspace. */
   async reconcileNow(): Promise<void> {
     await this.reconcileObservedGitMetadata("full");
+  }
+
+  /**
+   * Project roots that have been missing past the archive window and can be retired
+   * with their workspaces.
+   *
+   * The window is tracked per project root and cleared the moment the root is back or
+   * the project leaves the active set. The remaining guards are re-evaluated every pass
+   * and withhold the archive WITHOUT restarting the window: a workspace that falls idle
+   * again after an agent exits should be retired on the next pass, not after another
+   * full window.
+   *
+   * The live-reference check is NOT here: runOnce applies it to every archive candidate,
+   * so both archive reasons share one rule (see the archive step).
+   */
+  private async resolveAbandonedProjects(input: {
+    activeProjects: PersistedProjectRecord[];
+    reachableProjectIds: Set<string>;
+    workspaceDirectoryStates: Array<{
+      workspace: PersistedWorkspaceRecord;
+      state: DirectoryState;
+    }>;
+  }): Promise<Set<string>> {
+    const activeProjectIds = new Set(input.activeProjects.map((project) => project.projectId));
+    // Deleting the entry being visited is well defined for a Map iterator.
+    for (const projectId of this.missingProjectSince.keys()) {
+      if (!activeProjectIds.has(projectId) || input.reachableProjectIds.has(projectId)) {
+        this.missingProjectSince.delete(projectId);
+      }
+    }
+
+    const statesByProject = new Map<
+      string,
+      Array<{ workspace: PersistedWorkspaceRecord; state: DirectoryState }>
+    >();
+    for (const entry of input.workspaceDirectoryStates) {
+      const states = statesByProject.get(entry.workspace.projectId) ?? [];
+      states.push(entry);
+      statesByProject.set(entry.workspace.projectId, states);
+    }
+
+    const abandoned = new Set<string>();
+    await Promise.all(
+      input.activeProjects.map(async (project) => {
+        if (input.reachableProjectIds.has(project.projectId)) return;
+
+        const since = this.missingProjectSince.get(project.projectId) ?? this.now();
+        this.missingProjectSince.set(project.projectId, since);
+        if (this.now() - since < this.autoArchiveMissingProjectAfterMs) return;
+
+        const states = statesByProject.get(project.projectId) ?? [];
+        // A project with no active workspace has nothing to archive.
+        if (states.length === 0) return;
+        // One surviving directory means the location is only partly away.
+        if (states.some((entry) => entry.state !== "missing")) return;
+        // A pinned workspace is an explicit statement that it still matters.
+        if (states.some((entry) => entry.workspace.pinnedAt)) return;
+        abandoned.add(project.projectId);
+      }),
+    );
+    return abandoned;
   }
 
   private async reconcileGitMetadataForProjects(
