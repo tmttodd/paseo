@@ -1620,6 +1620,41 @@ describe("request outcome logging", () => {
     );
   });
 
+  test("logs a handler that answers its own failure below error", async () => {
+    const { logger, records } = createRecordingLogger();
+    const session = createSessionForTest({
+      logger,
+      projectRegistry: {
+        list: vi.fn().mockRejectedValue(new RequestOutcomeError("Project is unavailable.")),
+      },
+    });
+
+    await session.handleMessage({ type: "project.list.request", requestId: "projects-1" });
+
+    expect(records).toContainEqual({
+      level: 40,
+      msg: "Request could not be answered",
+      requestType: "project.list.request",
+    });
+    expect(records.filter((record) => record.level === 50)).toEqual([]);
+  });
+
+  test("logs an ordinary failure in that same handler as an error", async () => {
+    const { logger, records } = createRecordingLogger();
+    const session = createSessionForTest({
+      logger,
+      projectRegistry: { list: vi.fn().mockRejectedValue(new Error("registry exploded")) },
+    });
+
+    await session.handleMessage({ type: "project.list.request", requestId: "projects-2" });
+
+    expect(records).toContainEqual({
+      level: 50,
+      msg: "Failed to handle project.list.request",
+      requestType: "project.list.request",
+    });
+  });
+
   test("still logs an unexpected handler failure as an error", async () => {
     const { logger, records } = createRecordingLogger();
     const session = createSessionForTest({
@@ -1637,7 +1672,11 @@ describe("request outcome logging", () => {
       input: {},
     });
 
-    expect(records).toContainEqual({ level: 50, msg: "Error handling message" });
+    expect(records).toContainEqual({
+      level: 50,
+      msg: "Error handling message",
+      requestType: "plugin.rpc.invoke.request",
+    });
   });
 });
 

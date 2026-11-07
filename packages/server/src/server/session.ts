@@ -2187,6 +2187,23 @@ export class Session {
     return this.delivery.request(source, msg, () => this.handleRequest(msg, source));
   }
 
+  /**
+   * A handler that answers its own failure must not report a request outcome as a daemon fault:
+   * the caller already receives the reason in its response or rpc_error.
+   */
+  private logHandlerFailure(
+    details: Record<string, unknown> & { err?: unknown },
+    message: string,
+    requestType?: string,
+  ): void {
+    const context = requestType ? { ...details, requestType } : details;
+    if (details.err instanceof RequestOutcomeError) {
+      this.sessionLogger.warn(context, "Request could not be answered");
+      return;
+    }
+    this.sessionLogger.error(context, message);
+  }
+
   private async handleRequest(msg: SessionInboundMessage, source?: object): Promise<void> {
     this.inflightRequests++;
     if (this.inflightRequests > this.peakInflightRequests) {
@@ -2219,13 +2236,7 @@ export class Session {
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        if (err instanceof RequestOutcomeError) {
-          // The answer is already in the caller's rpc_error (an unknown agent, a plugin that is
-          // not running), so this is an outcome, not a daemon malfunction.
-          this.sessionLogger.warn({ err, requestType: msg.type }, "Request could not be answered");
-        } else {
-          this.sessionLogger.error({ err }, "Error handling message");
-        }
+        this.logHandlerFailure({ err }, "Error handling message", msg.type);
 
         const requestId =
           "requestId" in msg && typeof msg.requestId === "string" ? msg.requestId : undefined;
@@ -3328,7 +3339,7 @@ export class Session {
       await this.agentStorage.remove(agentId);
       await this.agentManager.deleteAgentState(agentId);
     } catch (error) {
-      this.sessionLogger.error({ err: error, agentId }, `Failed to fully delete agent ${agentId}`);
+      this.logHandlerFailure({ err: error, agentId }, `Failed to fully delete agent ${agentId}`);
     }
 
     this.emit({
@@ -3421,7 +3432,7 @@ export class Session {
       });
     } catch (error) {
       const message = getErrorMessageOr(error, "Failed to detach agent");
-      this.sessionLogger.error({ err: error, agentId, requestId }, "Failed to detach agent");
+      this.logHandlerFailure({ err: error, agentId, requestId }, "Failed to detach agent");
       this.emit({
         type: "agent.detach.response",
         payload: {
@@ -3553,7 +3564,7 @@ export class Session {
         payload: { requestId, agentId, accepted: true, error: null },
       });
     } catch (error) {
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error, agentId, requestId },
         "session: update_agent_request error",
       );
@@ -3639,7 +3650,7 @@ export class Session {
         await this.emitWorkspaceUpdatesForWorkspaceIds(affectedWorkspaceIds);
       }
     } catch (error) {
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error, projectId, requestId },
         "session: project.rename.request error",
       );
@@ -3793,9 +3804,10 @@ export class Session {
         },
       });
     } catch (error) {
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error, projectId, requestId },
         "session: project.remove.request error",
+        request.type,
       );
       this.emit({
         type: "activity_log",
@@ -3865,7 +3877,7 @@ export class Session {
 
       await this.emitWorkspaceUpdatesForWorkspaceIds([workspaceId]);
     } catch (error) {
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error, workspaceId, requestId },
         "session: workspace.title.set.request error",
       );
@@ -4328,7 +4340,7 @@ export class Session {
       });
     } catch (error) {
       const wireError = error instanceof SessionRequestError ? error : toWorktreeWireError(error);
-      this.sessionLogger.error({ err: error }, "Failed to create agent");
+      this.logHandlerFailure({ err: error }, "Failed to create agent", msg.type);
       this.emit({
         type: "status",
         payload: {
@@ -4611,7 +4623,7 @@ export class Session {
       }
     } catch (error) {
       const message = getErrorMessage(error);
-      this.sessionLogger.error({ err: error }, "Failed to resume agent");
+      this.logHandlerFailure({ err: error }, "Failed to resume agent", msg.type);
       if (requestId) {
         this.emit({
           type: "rpc_error",
@@ -4683,7 +4695,7 @@ export class Session {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.sessionLogger.error({ err: error }, "Failed to import agent");
+      this.logHandlerFailure({ err: error }, "Failed to import agent", msg.type);
       this.emit({
         type: "status",
         payload: {
@@ -4760,16 +4772,11 @@ export class Session {
       }
     } catch (error) {
       const message = getErrorMessage(error);
-      if (error instanceof RequestOutcomeError) {
-        // The answer is already in the caller's rpc_error, so this handler must not claim a
-        // daemon malfunction the way its generic catch does.
-        this.sessionLogger.warn(
-          { err: error, agentId, requestType: msg.type },
-          "Request could not be answered",
-        );
-      } else {
-        this.sessionLogger.error({ err: error, agentId }, `Failed to refresh agent ${agentId}`);
-      }
+      this.logHandlerFailure(
+        { err: error, agentId },
+        `Failed to refresh agent ${agentId}`,
+        msg.type,
+      );
       if (requestId) {
         this.emit({
           type: "rpc_error",
@@ -4816,7 +4823,7 @@ export class Session {
       }
     } catch (error) {
       if (requestId) {
-        this.sessionLogger.error(
+        this.logHandlerFailure(
           { err: error, agentId },
           `Failed to cancel running agent on request for agent ${agentId}`,
         );
@@ -4990,7 +4997,7 @@ export class Session {
         });
       }
     } catch (error) {
-      this.sessionLogger.error({ err: error, agentIds }, "Failed to clear agent attention");
+      this.logHandlerFailure({ err: error, agentIds }, "Failed to clear agent attention");
       // Don't throw - this is not critical
     }
   }
@@ -5120,7 +5127,11 @@ export class Session {
         },
       });
     } catch (error) {
-      this.sessionLogger.error({ err: error, agentId, draftConfig }, "Failed to list commands");
+      this.logHandlerFailure(
+        { err: error, agentId, draftConfig },
+        "Failed to list commands",
+        msg.type,
+      );
       this.emit({
         type: "list_commands_response",
         payload: {
@@ -5159,10 +5170,7 @@ export class Session {
         });
       }
     } catch (error) {
-      this.sessionLogger.error(
-        { err: error, agentId, requestId },
-        "Failed to respond to permission",
-      );
+      this.logHandlerFailure({ err: error, agentId, requestId }, "Failed to respond to permission");
       this.emit({
         type: "activity_log",
         payload: {
@@ -6302,7 +6310,7 @@ export class Session {
       }
       const code = error instanceof SessionRequestError ? error.code : "fetch_agents_failed";
       const message = error instanceof Error ? error.message : "Failed to fetch agents";
-      this.sessionLogger.error({ err: error }, "Failed to handle fetch_agents_request");
+      this.logHandlerFailure({ err: error }, "Failed to handle fetch_agents_request", request.type);
       this.emit({
         type: "rpc_error",
         payload: {
@@ -6330,7 +6338,11 @@ export class Session {
     } catch (error) {
       const code = error instanceof SessionRequestError ? error.code : "fetch_agent_history_failed";
       const message = error instanceof Error ? error.message : "Failed to fetch agent history";
-      this.sessionLogger.error({ err: error }, "Failed to handle fetch_agent_history_request");
+      this.logHandlerFailure(
+        { err: error },
+        "Failed to handle fetch_agent_history_request",
+        request.type,
+      );
       this.emit({
         type: "rpc_error",
         payload: {
@@ -6371,9 +6383,10 @@ export class Session {
           : "fetch_recent_provider_sessions_failed";
       const message =
         error instanceof Error ? error.message : "Failed to fetch recent provider sessions";
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error },
         "Failed to handle fetch_recent_provider_sessions_request",
+        request.type,
       );
       this.emit({
         type: "rpc_error",
@@ -6467,7 +6480,11 @@ export class Session {
       await owner?.release();
       const code = error instanceof SessionRequestError ? error.code : "fetch_workspaces_failed";
       const message = error instanceof Error ? error.message : "Failed to fetch workspaces";
-      this.sessionLogger.error({ err: error }, "Failed to handle fetch_workspaces_request");
+      this.logHandlerFailure(
+        { err: error },
+        "Failed to handle fetch_workspaces_request",
+        request.type,
+      );
       this.emit({
         type: "rpc_error",
         payload: {
@@ -6500,7 +6517,7 @@ export class Session {
         },
       });
     } catch (error) {
-      this.sessionLogger.error({ err: error }, "Failed to handle project.list.request");
+      this.logHandlerFailure({ err: error }, "Failed to handle project.list.request", request.type);
       this.emit({
         type: "rpc_error",
         payload: {
@@ -6983,7 +7000,7 @@ export class Session {
         });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to open project";
-      this.sessionLogger.error({ err: error, cwd }, "Failed to open project");
+      this.logHandlerFailure({ err: error, cwd }, "Failed to open project", request.type);
       this.emit({
         type: "open_project_response",
         payload: {
@@ -7046,7 +7063,7 @@ export class Session {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to add project";
-      this.sessionLogger.error({ err: error, cwd }, "Failed to add project");
+      this.logHandlerFailure({ err: error, cwd }, "Failed to add project", request.type);
       this.emit({
         type: "project.add.response",
         payload: {
@@ -7245,9 +7262,10 @@ export class Session {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to clone GitHub repo";
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error, repo: request.repo, targetDirectory: request.targetDirectory },
         "Failed to clone GitHub project",
+        request.type,
       );
       this.emit({
         type: "project.github.clone.response",
@@ -7541,9 +7559,10 @@ export class Session {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to archive workspace";
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error, workspaceId: request.workspaceId },
         "Failed to archive workspace",
+        request.type,
       );
       this.emit({
         type: "archive_workspace_response",
@@ -7659,9 +7678,10 @@ export class Session {
         });
       } catch (error) {
         const message = getErrorMessage(error);
-        this.sessionLogger.error(
+        this.logHandlerFailure(
           { err: error, workspaceId: requestedWorkspaceId },
           "Failed to clear workspace attention",
+          request.type,
         );
         results.push({
           workspaceId: requestedWorkspaceId,
@@ -7737,7 +7757,11 @@ export class Session {
       });
     } catch (error) {
       const message = getErrorMessage(error);
-      this.sessionLogger.error({ err: error, workspaceId }, "Failed to mark workspace unread");
+      this.logHandlerFailure(
+        { err: error, workspaceId },
+        "Failed to mark workspace unread",
+        request.type,
+      );
       this.emit({
         type: "workspace.mark_unread.response",
         payload: {
@@ -7878,9 +7902,10 @@ export class Session {
         source,
       );
     } catch (error) {
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error, agentId: msg.agentId },
         "Failed to handle fetch_agent_timeline_request",
+        msg.type,
       );
       this.emitForSource(
         {
@@ -8008,9 +8033,10 @@ export class Session {
         source,
       );
     } catch (error) {
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error, agentId: msg.agentId },
         "Failed to handle agent.timeline.list_prompts.request",
+        msg.type,
       );
       this.emitForSource(
         {
@@ -8196,9 +8222,10 @@ export class Session {
         },
       });
     } catch (error) {
-      this.sessionLogger.error(
+      this.logHandlerFailure(
         { err: error, agentId: msg.agentId },
         "Failed to handle agent.fork_context.request",
+        msg.type,
       );
       this.emit({
         type: "agent.fork_context.response",
@@ -8456,7 +8483,7 @@ export class Session {
         (error.name === "AbortError" || error.message.toLowerCase().includes("aborted"));
       if (!isAbort) {
         const message = errorToFriendlyMessage(error);
-        this.sessionLogger.error({ err: error, agentId }, "wait_for_finish_request failed");
+        this.logHandlerFailure({ err: error, agentId }, "wait_for_finish_request failed");
         const final = await this.getAgentPayloadById(agentId);
         this.emit({
           type: "wait_for_finish_response",
