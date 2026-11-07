@@ -178,6 +178,7 @@ const SourceSchema = z.object({
                 provider: "pi",
                 status: "ready",
                 enabled: true,
+                supportsExactMcpPreapproval: false,
                 models: [{ id: "model-a", label: "Model A", thinkingSet: 0 }],
               },
             ],
