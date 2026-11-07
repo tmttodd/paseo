@@ -279,14 +279,21 @@ export class WorkspaceReconciliationService {
       reachableProjectIds,
       workspaceDirectoryStates,
     });
-    const missingWorkspaces = workspaceDirectoryStates
-      .filter(
-        ({ workspace, state }) =>
-          state === "missing" &&
-          (reachableProjectIds.has(workspace.projectId) ||
-            abandonedProjectIds.has(workspace.projectId)),
-      )
-      .map(({ workspace }) => workspace);
+    const archiveCandidates = workspaceDirectoryStates.filter(
+      ({ workspace, state }) =>
+        state === "missing" &&
+        (reachableProjectIds.has(workspace.projectId) ||
+          abandonedProjectIds.has(workspace.projectId)),
+    );
+    // Nothing live may be stranded by either archive reason: this path drops only the
+    // workspace's script runtime and port plan, never its agents or terminals. A
+    // workspace still claimed by a running agent, a terminal, a script or a service
+    // port plan keeps its record and is retried on a later pass, once it is free.
+    const missingWorkspaces: PersistedWorkspaceRecord[] = [];
+    for (const { workspace } of archiveCandidates) {
+      if (await this.isWorkspaceInUse(workspace.workspaceId)) continue;
+      missingWorkspaces.push(workspace);
+    }
     await Promise.all(
       missingWorkspaces.map(async (workspace) => {
         const timestamp = new Date().toISOString();
@@ -342,10 +349,13 @@ export class WorkspaceReconciliationService {
    * with their workspaces.
    *
    * The window is tracked per project root and cleared the moment the root is back or
-   * the project leaves the active set. The other guards are re-evaluated every pass and
-   * withhold the archive WITHOUT restarting the window: a workspace that falls idle
+   * the project leaves the active set. The remaining guards are re-evaluated every pass
+   * and withhold the archive WITHOUT restarting the window: a workspace that falls idle
    * again after an agent exits should be retired on the next pass, not after another
    * full window.
+   *
+   * The live-reference check is NOT here: runOnce applies it to every archive candidate,
+   * so both archive reasons share one rule (see the archive step).
    */
   private async resolveAbandonedProjects(input: {
     activeProjects: PersistedProjectRecord[];
@@ -389,10 +399,6 @@ export class WorkspaceReconciliationService {
         if (states.some((entry) => entry.state !== "missing")) return;
         // A pinned workspace is an explicit statement that it still matters.
         if (states.some((entry) => entry.workspace.pinnedAt)) return;
-        // Nothing live may be stranded: the archive never stops agents or terminals.
-        for (const { workspace } of states) {
-          if (await this.isWorkspaceInUse(workspace.workspaceId)) return;
-        }
         abandoned.add(project.projectId);
       }),
     );

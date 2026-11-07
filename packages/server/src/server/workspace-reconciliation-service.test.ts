@@ -378,6 +378,9 @@ describe("WorkspaceReconciliationService", () => {
       projectRegistry,
       workspaceRegistry,
       logger: createTestLogger(),
+      // The archive is withheld while anything live claims the workspace, so a
+      // test that expects an archive must state that the workspace is free.
+      isWorkspaceInUse: () => false,
     });
 
     const metadataResult = await service.reconcileGitMetadata();
@@ -679,6 +682,9 @@ describe("WorkspaceReconciliationService", () => {
       projectRegistry,
       workspaceRegistry,
       logger: createTestLogger(),
+      // The archive is withheld while anything live claims the workspace, so a
+      // test that expects an archive must state that the workspace is free.
+      isWorkspaceInUse: () => false,
       onWorkspaceArchived: (workspaceId) => {
         archivedWorkspaceIds.push(workspaceId);
       },
@@ -898,6 +904,113 @@ describe("WorkspaceReconciliationService", () => {
     ]);
   });
 
+  test("withholds the archive while an agent still claims the workspace", async () => {
+    const projectRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-live-claim-")));
+    const missingWorkspace = path.join(projectRoot, "missing-workspace");
+    tempDirs.push(projectRoot);
+    const registries = createTestRegistries();
+    registries.projects.set(
+      "p1",
+      createPersistedProjectRecord({
+        projectId: "p1",
+        rootPath: projectRoot,
+        projectKey: canonicalLocalProjectKey(projectRoot),
+        kind: "non_git",
+        displayName: "live-claim",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+    registries.workspaces.set(
+      "w1",
+      createPersistedWorkspaceRecord({
+        workspaceId: "w1",
+        projectId: "p1",
+        cwd: missingWorkspace,
+        kind: "directory",
+        displayName: "live-claim",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+    let inUse = true;
+    const service = new WorkspaceReconciliationService({
+      projectRegistry: registries.projectRegistry,
+      workspaceRegistry: registries.workspaceRegistry,
+      logger: createTestLogger(),
+      isWorkspaceInUse: () => inUse,
+    });
+
+    // The archive drops only the script runtime and port plan, so a live claim must
+    // hold it back rather than leave the agent or terminal bound to a gone workspace.
+    expect((await service.runOnce()).changesApplied).toEqual([]);
+    expect(registries.workspaces.get("w1")?.archivedAt).toBeNull();
+
+    inUse = false;
+    expect((await service.runOnce()).changesApplied).toEqual([
+      {
+        kind: "workspace_archived",
+        workspaceId: "w1",
+        directory: missingWorkspace,
+        reason: "directory_missing",
+      },
+    ]);
+  });
+
+  test("archives a free workspace while a live sibling keeps its record", async () => {
+    const projectRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-live-sibling-")));
+    tempDirs.push(projectRoot);
+    const registries = createTestRegistries();
+    registries.projects.set(
+      "p1",
+      createPersistedProjectRecord({
+        projectId: "p1",
+        rootPath: projectRoot,
+        projectKey: canonicalLocalProjectKey(projectRoot),
+        kind: "non_git",
+        displayName: "live-sibling",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+    for (const [workspaceId, slug] of [
+      ["w1", "free"],
+      ["w2", "busy"],
+    ] as const) {
+      registries.workspaces.set(
+        workspaceId,
+        createPersistedWorkspaceRecord({
+          workspaceId,
+          projectId: "p1",
+          cwd: path.join(projectRoot, slug),
+          kind: "directory",
+          displayName: slug,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }),
+      );
+    }
+    const service = new WorkspaceReconciliationService({
+      projectRegistry: registries.projectRegistry,
+      workspaceRegistry: registries.workspaceRegistry,
+      logger: createTestLogger(),
+      isWorkspaceInUse: (workspaceId) => workspaceId === "w2",
+    });
+
+    const result = await service.runOnce();
+
+    expect(result.changesApplied).toEqual([
+      {
+        kind: "workspace_archived",
+        workspaceId: "w1",
+        directory: path.join(projectRoot, "free"),
+        reason: "directory_missing",
+      },
+    ]);
+    expect(registries.workspaces.get("w1")?.archivedAt).toEqual(expect.any(String));
+    expect(registries.workspaces.get("w2")?.archivedAt).toBeNull();
+  });
+
   test("does not archive a project that holds a pinned workspace", async () => {
     const mountParent = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-pinned-")));
     tempDirs.push(mountParent);
@@ -973,6 +1086,9 @@ describe("WorkspaceReconciliationService", () => {
       projectRegistry,
       workspaceRegistry,
       logger: createTestLogger(),
+      // The archive is withheld while anything live claims the workspace, so a
+      // test that expects an archive must state that the workspace is free.
+      isWorkspaceInUse: () => false,
     });
 
     const result = await service.runOnce();
@@ -1532,6 +1648,9 @@ describe("WorkspaceReconciliationService", () => {
       projectRegistry,
       workspaceRegistry,
       logger: createTestLogger(),
+      // The archive is withheld while anything live claims the workspace, so a
+      // test that expects an archive must state that the workspace is free.
+      isWorkspaceInUse: () => false,
       workspaceGitService: {
         getCheckout: async (cwd) => {
           if (cwd === replacedWorkspace) {
@@ -1714,6 +1833,9 @@ describe("WorkspaceReconciliationService", () => {
       projectRegistry,
       workspaceRegistry,
       logger: createTestLogger(),
+      // The archive is withheld while anything live claims the workspace, so a
+      // test that expects an archive must state that the workspace is free.
+      isWorkspaceInUse: () => false,
       onChanges: (changes) => reportedChanges.push(...changes),
     });
 
@@ -1765,6 +1887,9 @@ describe("WorkspaceReconciliationService", () => {
       projectRegistry,
       workspaceRegistry,
       logger,
+      // The archive is withheld while anything live claims the workspace, so a
+      // test that expects an archive must state that the workspace is free.
+      isWorkspaceInUse: () => false,
     });
 
     await service.runOnce();
