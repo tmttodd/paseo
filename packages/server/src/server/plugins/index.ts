@@ -27,6 +27,7 @@ import { PluginRuntime } from "./runtime.js";
 import { BuiltinPluginLoader, type BuiltinPlugin } from "./builtin/index.js";
 import type { PluginProviderMetadata } from "./plugin-process-protocol.js";
 import { readPluginProviderIcon } from "./provider-icon.js";
+import { RequestOutcomeError } from "../request-outcome.js";
 import {
   type AgentUsageLookup,
   type ListUsageReportsOptions,
@@ -258,10 +259,10 @@ export class PluginService {
       assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
       const pluginId = PluginIdSchema.parse(input.id ?? manifest.id);
       if (this.builtinPluginIds.has(pluginId)) {
-        throw new Error(`Plugin ID "${pluginId}" is reserved for a built-in plugin`);
+        throw new RequestOutcomeError(`Plugin ID "${pluginId}" is reserved for a built-in plugin`);
       }
       if (this.configStore.get().plugins?.[pluginId]) {
-        throw new Error(
+        throw new RequestOutcomeError(
           `Plugin ID "${pluginId}" is already configured; choose another ID with --id`,
         );
       }
@@ -290,7 +291,7 @@ export class PluginService {
     ref?: string;
   }): Promise<PluginListItem> {
     if (input.id && this.builtinPluginIds.has(input.id)) {
-      throw new Error(`Plugin ID "${input.id}" is reserved for a built-in plugin`);
+      throw new RequestOutcomeError(`Plugin ID "${input.id}" is reserved for a built-in plugin`);
     }
     const reference = parsePluginSourceReference(input.source);
     if (reference.kind === "directory") {
@@ -313,10 +314,12 @@ export class PluginService {
         await this.checkRequirements(candidate.directory);
         pluginId = PluginIdSchema.parse(input.id ?? candidate.defaultId);
         if (this.builtinPluginIds.has(pluginId)) {
-          throw new Error(`Plugin ID "${pluginId}" is reserved for a built-in plugin`);
+          throw new RequestOutcomeError(
+            `Plugin ID "${pluginId}" is reserved for a built-in plugin`,
+          );
         }
         if (this.configStore.get().plugins?.[pluginId]) {
-          throw new Error(
+          throw new RequestOutcomeError(
             `Plugin ID "${pluginId}" is already configured; choose another ID with --id`,
           );
         }

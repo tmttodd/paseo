@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import type { AgentProvider } from "./agent-sdk-types.js";
 import type { AgentManager, ManagedAgent } from "./agent-manager.js";
 import type { AgentStorage } from "./agent-storage.js";
+import { RequestOutcomeError } from "../request-outcome.js";
 import {
   buildConfigOverrides,
   buildSessionConfig,
@@ -12,7 +13,7 @@ import {
   toAgentPersistenceHandle,
 } from "../persistence-hooks.js";
 
-export class AgentNotFoundError extends Error {
+export class AgentNotFoundError extends RequestOutcomeError {
   constructor(agentId: string) {
     super(`Agent not found: ${agentId}`);
     this.name = "AgentNotFoundError";
@@ -106,7 +107,9 @@ export async function ensureAgentLoaded(
 
     const validProviders = deps.validProviders ?? deps.agentManager.getRegisteredProviderIds();
     if (!isStoredAgentProviderAvailable(record, validProviders)) {
-      throw new Error(`Agent ${agentId} references unavailable provider '${record.provider}'`);
+      throw new RequestOutcomeError(
+        `Agent ${agentId} references unavailable provider '${record.provider}'`,
+      );
     }
 
     const handle = toAgentPersistenceHandle(validProviders, record.persistence);
@@ -129,7 +132,9 @@ export async function ensureAgentLoaded(
         validProviders,
       });
       if (!config) {
-        throw new Error(`Agent ${agentId} references unavailable provider '${record.provider}'`);
+        throw new RequestOutcomeError(
+          `Agent ${agentId} references unavailable provider '${record.provider}'`,
+        );
       }
       snapshot = await deps.agentManager.createAgent(config, agentId, {
         labels: record.labels,

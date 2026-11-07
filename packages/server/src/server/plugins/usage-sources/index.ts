@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AgentUsageSession } from "../../agent/agent-sdk-types.js";
+import { RequestOutcomeError } from "../../request-outcome.js";
 import type { UsageScope } from "@getpaseo/plugin/server/usage";
 import { z } from "zod";
 import type { Logger } from "pino";
@@ -125,7 +126,7 @@ export class UsageSourceRegistry {
   }
 
   private async discoverAgent(agentId: string): Promise<string[]> {
-    if (!this.agents.hasAgent(agentId)) throw new Error(`Unknown agent: ${agentId}`);
+    if (!this.agents.hasAgent(agentId)) throw new RequestOutcomeError(`Unknown agent: ${agentId}`);
     const session = this.agents.usageSession(agentId);
     if (!session) {
       this.byAgent.delete(agentId);

@@ -1,4 +1,5 @@
 import { createIdleRuntimeCleanup } from "./idle-runtime-cleanup/index.js";
+import { RequestOutcomeError } from "../request-outcome.js";
 import {
   prepareAgentMessage,
   formatAgentMessage,
@@ -8048,6 +8049,7 @@ test("subscribe hides provider subagents of internal parents from global subscri
   expect(() => manager.fetchProviderSubagentTimeline(internalAgentId, "hidden-child")).toThrow(
     `Unknown agent '${internalAgentId}'`,
   );
+  expect(() => manager.listProviderSubagents(internalAgentId)).toThrow(RequestOutcomeError);
   expect(manager.listProviderSubagentActivity()).toEqual([]);
 });
 

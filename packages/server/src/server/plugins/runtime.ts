@@ -33,6 +33,7 @@ import type {
   PluginUsageSourceMetadata,
 } from "./plugin-process-protocol.js";
 import { PluginProcessMessageSchema } from "./plugin-process-protocol.js";
+import { RequestOutcomeError } from "../request-outcome.js";
 import { PluginSessionSocket } from "./session-socket.js";
 import { InternalPluginChild } from "./internal-child.js";
 import { evaluateBundle } from "./bundle-evaluator.js";
@@ -399,13 +400,13 @@ export class PluginRuntime {
 
   fetchUsage(pluginId: string, sourceId: string, input: unknown): Promise<unknown> {
     const loaded = this.plugins.get(pluginId);
-    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    if (!loaded) throw new RequestOutcomeError(`Plugin is not available: ${pluginId}`);
     return this.request(loaded, { type: "usage.fetch", requestId: randomUUID(), sourceId, input });
   }
 
   discoverUsage(pluginId: string, sourceId: string, scope: UsageScope): Promise<unknown> {
     const loaded = this.plugins.get(pluginId);
-    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    if (!loaded) throw new RequestOutcomeError(`Plugin is not available: ${pluginId}`);
     return this.request(loaded, {
       type: "usage.discover",
       requestId: randomUUID(),
@@ -420,7 +421,7 @@ export class PluginRuntime {
     request: ProviderStatusRequest,
   ): Promise<ProviderStatus> {
     const loaded = this.plugins.get(pluginId);
-    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    if (!loaded) throw new RequestOutcomeError(`Plugin is not available: ${pluginId}`);
     return ProviderStatusSchema.parse(
       await this.request(loaded, {
         type: "provider.status",
@@ -437,9 +438,11 @@ export class PluginRuntime {
     request: ProviderConnectRequest,
   ): Promise<ProviderConnection> {
     const loaded = this.plugins.get(pluginId);
-    if (!loaded?.child) throw new Error(`Plugin is not available: ${pluginId}`);
+    if (!loaded?.child) throw new RequestOutcomeError(`Plugin is not available: ${pluginId}`);
     if (!loaded.providers.some((provider) => provider.id === providerId)) {
-      throw new Error(`Plugin ${pluginId} does not contribute provider ${providerId}`);
+      throw new RequestOutcomeError(
+        `Plugin ${pluginId} does not contribute provider ${providerId}`,
+      );
     }
     const connectionId = randomUUID();
     let resolveConnected!: (connection: ProviderConnection) => void;
@@ -508,9 +511,9 @@ export class PluginRuntime {
 
   async invoke(pluginId: string, method: string, input: unknown): Promise<unknown> {
     const loaded = this.plugins.get(pluginId);
-    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    if (!loaded) throw new RequestOutcomeError(`Plugin is not available: ${pluginId}`);
     if (!loaded.methods.has(method))
-      throw new Error(`Plugin ${pluginId} does not contribute RPC ${method}`);
+      throw new RequestOutcomeError(`Plugin ${pluginId} does not contribute RPC ${method}`);
     return this.request(loaded, { type: "invoke", requestId: randomUUID(), method, input });
   }
 
@@ -582,7 +585,7 @@ export class PluginRuntime {
     options: ProviderCatalogOptions,
   ): Promise<string | undefined> {
     const loaded = this.plugins.get(pluginId);
-    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    if (!loaded) throw new RequestOutcomeError(`Plugin is not available: ${pluginId}`);
     const output = await this.request(loaded, {
       type: "provider.catalog_key",
       requestId: randomUUID(),
@@ -869,7 +872,7 @@ export class PluginRuntime {
     loaded.pending.delete(message.requestId);
     clearTimeout(pending.timeout);
     if (message.type === "result") pending.resolve(message.output);
-    else pending.reject(new Error(message.error));
+    else pending.reject(new RequestOutcomeError(message.error));
   }
 
   private handleProviderMessage(loaded: LoadedPlugin, message: PluginProcessMessage): void {

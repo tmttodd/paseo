@@ -61,7 +61,11 @@ import {
   resolveStoredAgentUpdatedAt,
   toAgentPersistenceHandle,
 } from "./persistence-hooks.js";
-import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent/agent-loading.js";
+import {
+  AgentNotFoundError,
+  ensureAgentLoaded,
+  ensureUnarchivedAgentLoaded,
+} from "./agent/agent-loading.js";
 import {
   sendPromptToAgent,
   waitForAgentRunStartWithTimeout,
@@ -127,6 +131,7 @@ import {
 import { buildStoredAgentPayload, toAgentPayload } from "./agent/agent-projections.js";
 import { assertPluginTimelineDataSize } from "./agent/agent-timeline-content.js";
 import { parsePluginClientId } from "./plugins/plugin-session-identity.js";
+import { RequestOutcomeError } from "./request-outcome.js";
 import { buildAgentForkContextAttachment } from "./agent/activity-curator.js";
 import { buildAgentPrompt } from "./agent/prompt-attachments.js";
 import type { StructuredGenerationDaemonConfig } from "./agent/structured-generation-providers.js";
@@ -2214,7 +2219,13 @@ export class Session {
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        this.sessionLogger.error({ err }, "Error handling message");
+        if (err instanceof RequestOutcomeError) {
+          // The answer is already in the caller's rpc_error (an unknown agent, a plugin that is
+          // not running), so this is an outcome, not a daemon malfunction.
+          this.sessionLogger.warn({ err, requestType: msg.type }, "Request could not be answered");
+        } else {
+          this.sessionLogger.error({ err }, "Error handling message");
+        }
 
         const requestId =
           "requestId" in msg && typeof msg.requestId === "string" ? msg.requestId : undefined;
@@ -4712,11 +4723,13 @@ export class Session {
       } else {
         const record = await this.agentStorage.get(agentId);
         if (!record) {
-          throw new Error(`Agent not found: ${agentId}`);
+          throw new AgentNotFoundError(agentId);
         }
         const registeredProviderIds = this.providerSnapshotManager.listRegisteredProviderIds();
         if (!isStoredAgentProviderAvailable(record, registeredProviderIds)) {
-          throw new Error(`Agent ${agentId} references unavailable provider '${record.provider}'`);
+          throw new RequestOutcomeError(
+            `Agent ${agentId} references unavailable provider '${record.provider}'`,
+          );
         }
         if (!toAgentPersistenceHandle(registeredProviderIds, record.persistence)) {
           throw new Error(`Agent ${agentId} cannot be refreshed because it lacks persistence`);
@@ -4747,7 +4760,16 @@ export class Session {
       }
     } catch (error) {
       const message = getErrorMessage(error);
-      this.sessionLogger.error({ err: error, agentId }, `Failed to refresh agent ${agentId}`);
+      if (error instanceof RequestOutcomeError) {
+        // The answer is already in the caller's rpc_error, so this handler must not claim a
+        // daemon malfunction the way its generic catch does.
+        this.sessionLogger.warn(
+          { err: error, agentId, requestType: msg.type },
+          "Request could not be answered",
+        );
+      } else {
+        this.sessionLogger.error({ err: error, agentId }, `Failed to refresh agent ${agentId}`);
+      }
       if (requestId) {
         this.emit({
           type: "rpc_error",

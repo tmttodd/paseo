@@ -94,6 +94,7 @@ import {
 } from "./provider-subagents/store.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
 import { extractAttention } from "../persistence-hooks.js";
+import { RequestOutcomeError } from "../request-outcome.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
@@ -5547,7 +5548,7 @@ export class AgentManager {
     const normalizedId = validateAgentId(id, "requireAgent");
     const agent = this.agents.get(normalizedId);
     if (!agent) {
-      throw new Error(`Unknown agent '${normalizedId}'`);
+      throw new RequestOutcomeError(`Unknown agent '${normalizedId}'`);
     }
     return agent;
   }
@@ -5563,7 +5564,7 @@ export class AgentManager {
   private requirePublicAgent(id: string): LiveManagedAgent {
     const agent = this.requireAgent(id);
     if (agent.internal) {
-      throw new Error(`Unknown agent '${agent.id}'`);
+      throw new RequestOutcomeError(`Unknown agent '${agent.id}'`);
     }
     return agent;
   }

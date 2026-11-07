@@ -8,6 +8,7 @@ import { AgentManager } from "./agent-manager.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
 import { startAgentRun } from "./agent-prompt.js";
 import { AgentStorage } from "./agent-storage.js";
+import { RequestOutcomeError } from "../request-outcome.js";
 import type {
   AgentClient,
   AgentLaunchContext,
@@ -17,6 +18,39 @@ import type {
   AgentSessionConfig,
 } from "./agent-sdk-types.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
+
+test("reports a stored agent whose provider is gone as a request outcome", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-loading-unavailable-"));
+  const logger = createTestLogger();
+  const storage = new AgentStorage(path.join(root, "agents"), logger);
+  const codex = createTestAgentClients().codex;
+  if (!codex) {
+    throw new Error("expected Codex test client");
+  }
+  const withProvider = new AgentManager({ clients: { codex }, registry: storage, logger });
+  const agentId = "00000000-0000-4000-8000-000000000311";
+  try {
+    await withProvider.createAgent({ provider: "codex", cwd: root }, agentId, {
+      workspaceId: "workspace-unavailable",
+    });
+    await withProvider.closeAgent(agentId);
+
+    // The daemon restarted without this provider registered: the stored record still names it.
+    const withoutProvider = new AgentManager({ clients: {}, registry: storage, logger });
+    await expect(
+      ensureAgentLoaded(agentId, {
+        agentManager: withoutProvider,
+        agentStorage: storage,
+        logger,
+      }),
+    ).rejects.toBeInstanceOf(RequestOutcomeError);
+  } finally {
+    await withProvider.closeAgent(agentId).catch(() => undefined);
+    await withProvider.flush().catch(() => undefined);
+    await storage.flush().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("loads archived records for history and active records with the interactive default", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agent-loading-purpose-"));

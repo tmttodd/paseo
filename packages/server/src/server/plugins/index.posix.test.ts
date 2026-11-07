@@ -16,6 +16,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import pino from "pino";
 import { afterEach, describe, expect, it } from "vitest";
+import { RequestOutcomeError } from "../request-outcome.js";
 import { DaemonConfigStore } from "../daemon-config-store.js";
 import { PluginService } from "./index.js";
 import { BuiltinPluginLoader } from "./builtin/index.js";
@@ -180,6 +181,22 @@ function createPluginSelectivePausedRuntime(pausedPluginId: string) {
 }
 
 describe("PluginService", () => {
+  it("reports a reserved builtin id on installSource as a request outcome", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const store = createStore(home);
+    const builtinPlugins = new BuiltinPluginLoader(path.join(home, "builtins"), [
+      "builtin-fixture",
+    ]);
+    const service = bindTestSessionHost(
+      new PluginService(pino({ level: "silent" }), store, "0.4.0", { builtinPlugins }),
+    );
+    await service.start();
+    await expect(
+      service.installSource({ source: "npm:paseo-fixture-plugin", id: "builtin-fixture" }),
+    ).rejects.toBeInstanceOf(RequestOutcomeError);
+  });
+
   it.each([
     { shadow: false, runtime: "subprocess" },
     { shadow: true, runtime: "subprocess" },
@@ -403,6 +420,9 @@ describe("PluginService", () => {
     await expect(service.installDirectory({ path: directory, id: "work-plugin" })).rejects.toThrow(
       "choose another ID with --id",
     );
+    await expect(
+      service.installDirectory({ path: directory, id: "work-plugin" }),
+    ).rejects.toBeInstanceOf(RequestOutcomeError);
 
     await writeFile(path.join(directory, "index.server.ts"), "export default broken syntax !!!");
     await expect(service.reloadPlugin("work-plugin")).rejects.toThrow();
@@ -1470,6 +1490,9 @@ export default function contribute() {
       await expect(service.installSource({ source: "npm:paseo-fixture-plugin" })).rejects.toThrow(
         "already configured",
       );
+      await expect(
+        service.installSource({ source: "npm:paseo-fixture-plugin" }),
+      ).rejects.toBeInstanceOf(RequestOutcomeError);
       expect(await readdir(path.join(home, "plugins", ".staging"))).toEqual([]);
       for (const name of [
         "bad-manifest",
