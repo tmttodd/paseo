@@ -1711,13 +1711,7 @@ interface HandlerOutcomeCase {
 function loadFailureStub(failure: Error, agentId: string): Partial<SessionForTestOptions> {
   return {
     agentStorage: {
-      get: vi.fn().mockResolvedValue({
-        agentId,
-        provider: "codex",
-        cwd: "/tmp/agent",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      } as never),
+      get: vi.fn().mockResolvedValue(createStoredAgentRecord({ id: agentId, cwd: "/tmp/agent" })),
     },
     agentManager: {
       getAgent: vi.fn(() => undefined),
@@ -1740,15 +1734,13 @@ function agentStub(failure: Error, method: string): Partial<SessionForTestOption
   };
 }
 
+// Only the intended method rejects: a stub that rejected get/list/update/archive alike would let
+// the row pass after the handler's first call drifted to another workspace method.
 function workspaceStub(failure: Error): Partial<SessionForTestOptions> {
-  const workspaceRegistry = {
-    get: vi.fn().mockRejectedValue(failure),
-    list: vi.fn().mockResolvedValue([]),
-    update: vi.fn().mockRejectedValue(failure),
-    archive: vi.fn().mockRejectedValue(failure),
-  };
-  return { workspaceRegistry: workspaceRegistry as never };
+  return { workspaceRegistry: { get: vi.fn().mockRejectedValue(failure) } };
 }
+
+const DELETE_AGENT_ID = "agent-delete";
 
 // The three ensureAgentLoaded rows fail at the provider lookup, so they prove the handler's catch
 // branches by class; they do not exercise the handler's own primary call (clearAgentAttention,
@@ -1756,8 +1748,8 @@ function workspaceStub(failure: Error): Partial<SessionForTestOptions> {
 const handlerOutcomeCases: HandlerOutcomeCase[] = [
   {
     name: "delete_agent_request",
-    handlerMessage: "Failed to fully delete agent agent-delete",
-    message: { type: "delete_agent_request", agentId: "agent-delete", requestId: "req-delete" },
+    handlerMessage: `Failed to fully delete agent ${DELETE_AGENT_ID}`,
+    message: { type: "delete_agent_request", agentId: DELETE_AGENT_ID, requestId: "req-delete" },
     overrides: (failure) => ({
       agentStorage: {
         get: vi.fn().mockResolvedValue(undefined),
@@ -1873,8 +1865,9 @@ describe("request outcome logging per handler", () => {
         level: 40,
         msg: "Request could not be answered",
         error: "not available",
-        ...(handlerCase.requestType ? { requestType: handlerCase.requestType } : {}),
       });
+      // Exact, so a row that passes no request type notices one appearing.
+      expect(records[0]?.requestType).toBe(handlerCase.requestType);
     });
 
     test(`${handlerCase.name} still logs an ordinary failure at error`, async () => {
@@ -1893,6 +1886,7 @@ describe("request outcome logging per handler", () => {
         msg: handlerCase.handlerMessage,
         error: "boom",
       });
+      expect(records[0]?.requestType).toBe(handlerCase.requestType);
     });
   }
 });
