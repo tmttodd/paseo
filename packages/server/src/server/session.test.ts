@@ -1,17 +1,13 @@
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import {
-  createWorkspaceRuntimeStore,
-  type WorkspaceRuntimeStore,
-} from "./workspace-runtime-store/index.js";
-import { createAgentMessageDeliveryStub } from "./test-utils/session-stubs.js";
-import {
-  createMessageReceiptsStub,
-  createTestCreationService,
-} from "./test-utils/session-stubs.js";
+  createRecordingLogger,
+  createSessionForTest,
+  createStoredAgentRecord,
+} from "./session.test-harness.js";
 import { execSync } from "child_process";
 import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve as resolvePath } from "path";
-import pino from "pino";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -28,12 +24,9 @@ import {
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import { Session } from "./session.js";
-import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import { StructuredAgentFallbackError } from "./agent/agent-response-loop.js";
-import type { StoredAgentRecord } from "./agent/agent-storage.js";
 import type { AgentManagerEvent } from "./agent/agent-manager.js";
-import type { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { WorkspaceLabelError, type WorkspaceLabelService } from "./workspace-labels/index.js";
 import { RequestOutcomeError } from "./request-outcome.js";
 import { createPersistedProjectRecord } from "./workspace-registry.js";
@@ -43,16 +36,7 @@ import type { SessionInboundMessage, SessionOutboundMessage } from "./messages.j
 import {
   asSessionInternals as asSessionInternalsHelper,
   asPluginRuntime,
-  asSessionLogger,
-  asAgentManager,
-  asAgentStorage,
-  asDownloadTokenStore,
   asPushNotifications,
-  asScheduleService,
-  asCheckoutDiffManager,
-  asGitHubService,
-  asWorkspaceGitService,
-  asDaemonConfigStore,
   findByType,
   createProviderSnapshot,
   createProviderSnapshotManagerStub,
@@ -62,7 +46,6 @@ import {
   GitHubAuthenticationError,
   GitHubCliMissingError,
   GitHubCommandError,
-  type GitHubService,
 } from "../services/github-service.js";
 import type { CheckDetails, ForgeService } from "../services/forge-service.js";
 import type { GitHubPullRequestStatusFacts } from "../services/github-facts.js";
@@ -102,17 +85,6 @@ interface SessionHandlerInternals {
 
 function asSessionInternals(session: Session): SessionHandlerInternals {
   return asSessionInternalsHelper<SessionHandlerInternals>(session);
-}
-
-function createBinaryMessageHandler(
-  binaryMessages: Uint8Array[] | undefined,
-): ((frame: Uint8Array) => void) | undefined {
-  if (!binaryMessages) {
-    return undefined;
-  }
-  return (frame) => {
-    binaryMessages.push(frame);
-  };
 }
 
 test("interruptAgentIfRunning rejects when graceful cancellation is refused", async () => {
@@ -294,168 +266,6 @@ vi.mock("./worktree-bootstrap.js", async (importOriginal) => {
     spawnWorkspaceScript: spawnMocks.spawnWorkspaceScript,
   };
 });
-
-interface SessionForTestOptions {
-  workspaceRuntimeStore?: WorkspaceRuntimeStore;
-  sendToSource?: SessionOptions["onMessageToSource"];
-  clientId?: string;
-  permissions?: readonly DaemonPermission[];
-  agentManager?: { [K in keyof SessionOptions["agentManager"]]?: unknown };
-  agentStorage?: { [K in keyof SessionOptions["agentStorage"]]?: unknown };
-  github?: Partial<ForgeService & GitHubService>;
-  checkoutDiffManager?: { scheduleRefreshForCwd: ReturnType<typeof vi.fn> };
-  workspaceGitService?: {
-    getCheckout?: ReturnType<typeof vi.fn>;
-    getCheckoutDiff?: ReturnType<typeof vi.fn>;
-    getSnapshot?: ReturnType<typeof vi.fn>;
-    suggestBranchesForCwd?: ReturnType<typeof vi.fn>;
-    listStashes?: ReturnType<typeof vi.fn>;
-    validateBranchRef?: ReturnType<typeof vi.fn>;
-    hasLocalBranch?: ReturnType<typeof vi.fn>;
-    resolveRepoRemoteUrl?: ReturnType<typeof vi.fn>;
-    resolveRepoRoot?: ReturnType<typeof vi.fn>;
-    resolveForge?: ReturnType<typeof vi.fn>;
-    getWorkspaceGitMetadata?: ReturnType<typeof vi.fn>;
-    getProjectSlug?: ReturnType<typeof vi.fn>;
-  };
-  workspaceRegistry?: { get: ReturnType<typeof vi.fn> };
-  projectRegistry?: Partial<SessionOptions["projectRegistry"]>;
-  terminalManager?: SessionOptions["terminalManager"];
-  serviceProxy?: SessionOptions["serviceProxy"];
-  scriptRuntimeStore?: SessionOptions["scriptRuntimeStore"];
-  getDaemonTcpPort?: () => number | null;
-  getDaemonTcpHost?: () => string | null;
-  providerSnapshotManager?: ProviderSnapshotManager;
-  hubExecutionAgents?: SessionOptions["hubExecutionAgents"];
-  stt?: SessionOptions["stt"];
-  voice?: SessionOptions["voice"];
-  paseoHome?: string;
-  serverId?: SessionOptions["serverId"];
-  daemonVersion?: SessionOptions["daemonVersion"];
-  daemonRuntimeConfig?: SessionOptions["daemonRuntimeConfig"];
-  downloadTokenStore?: SessionOptions["downloadTokenStore"];
-  pushNotifications?: SessionOptions["pushNotifications"];
-  messages?: unknown[];
-  targetedMessages?: Array<{ source: object; message: SessionOutboundMessage }>;
-  binaryMessages?: Uint8Array[];
-  pluginRuntime?: SessionOptions["pluginRuntime"];
-  orchestrationSkills?: SessionOptions["orchestrationSkills"];
-  workspaceLabelService?: WorkspaceLabelService;
-  logger?: SessionOptions["logger"];
-}
-
-function createSessionForTest(options: SessionForTestOptions = {}): Session {
-  const logger = options.logger ?? pino({ level: "silent" });
-  const github = options.github ?? {
-    invalidate: vi.fn(),
-    searchIssuesAndPrs: vi.fn(),
-    createPullRequest: vi.fn(),
-    mergePullRequest: vi.fn(),
-  };
-  const checkoutDiffManager = options.checkoutDiffManager ?? {
-    scheduleRefreshForCwd: vi.fn(),
-  };
-  const workspaceGitService = {
-    getCheckout: vi.fn(),
-    getCheckoutDiff: vi.fn(),
-    getSnapshot: vi.fn(),
-    suggestBranchesForCwd: vi.fn(),
-    listStashes: vi.fn(),
-
-    validateBranchRef: vi.fn(),
-    hasLocalBranch: vi.fn(),
-    resolveRepoRemoteUrl: vi.fn(),
-    resolveRepoRoot: vi.fn(),
-    getWorkspaceGitMetadata: vi.fn(),
-    resolveForge: vi.fn().mockResolvedValue({ forge: "github", service: github }),
-    // Mirror production: invalidateForge resolves the forge and busts the
-    // adapter's cache. The resolved forge here is github, so delegate to it.
-    invalidateForge: vi.fn((cwd: string) => github.invalidate({ cwd })),
-    getProjectSlug: vi.fn(),
-    ...options.workspaceGitService,
-  };
-  const messages = options.messages ?? [];
-
-  const sessionOptions: SessionOptions = {
-    workspaceRuntimeStore: options.workspaceRuntimeStore ?? createWorkspaceRuntimeStore(),
-    messageReceipts: createMessageReceiptsStub(),
-    agentMessages: createAgentMessageDeliveryStub(),
-    creationService: createTestCreationService(),
-    clientId: options.clientId ?? "test-client",
-    onMessage: (message) => messages.push(message),
-    ...(options.targetedMessages
-      ? {
-          onMessageToSource: (source: object, message: SessionOutboundMessage) =>
-            options.targetedMessages?.push({ source, message }),
-        }
-      : {
-          onMessageToSource: (_source: object, message: SessionOutboundMessage) =>
-            messages.push(message),
-        }),
-    onBinaryMessage: createBinaryMessageHandler(options.binaryMessages),
-    logger,
-    downloadTokenStore: options.downloadTokenStore ?? asDownloadTokenStore(),
-    pushNotifications: options.pushNotifications ?? asPushNotifications(),
-    paseoHome: options.paseoHome ?? "/tmp/paseo-home",
-    agentManager: asAgentManager({
-      listAgents: vi.fn(() => []),
-      listProviderSubagentActivity: vi.fn(() => []),
-      subscribe: vi.fn(() => () => {}),
-      ...options.agentManager,
-    }),
-    agentStorage: asAgentStorage({
-      get: vi.fn().mockResolvedValue(undefined),
-      list: vi.fn().mockResolvedValue([]),
-      ...options.agentStorage,
-    }),
-    projectRegistry: {
-      list: vi.fn().mockResolvedValue([]),
-      get: vi.fn(),
-      getOrCreateActiveByRoot: vi.fn(),
-      upsert: vi.fn(),
-      archive: vi.fn(),
-      remove: vi.fn(),
-      initialize: vi.fn(),
-      existsOnDisk: vi.fn(),
-      ...options.projectRegistry,
-    },
-    workspaceRegistry: options.workspaceRegistry ?? {
-      get: vi.fn(),
-      list: vi.fn().mockResolvedValue([]),
-    },
-    workspaceLabelService: options.workspaceLabelService,
-    scheduleService: asScheduleService(),
-    checkoutDiffManager: asCheckoutDiffManager(checkoutDiffManager),
-    github: asGitHubService(github),
-    workspaceGitService: asWorkspaceGitService(workspaceGitService),
-    daemonConfigStore: asDaemonConfigStore({
-      get: vi.fn(() => ({
-        mcp: { injectIntoAgents: false },
-        providers: {},
-      })),
-      onChange: vi.fn(() => () => {}),
-    }),
-    pluginRuntime: options.pluginRuntime,
-    orchestrationSkills: options.orchestrationSkills,
-    stt: options.stt ?? null,
-    tts: null,
-    terminalManager: options.terminalManager ?? null,
-    providerSnapshotManager:
-      options.providerSnapshotManager ?? createProviderSnapshotManagerStub().manager,
-    hubExecutionAgents: options.hubExecutionAgents,
-    serviceProxy: options.serviceProxy,
-    scriptRuntimeStore: options.scriptRuntimeStore,
-    getDaemonTcpPort: options.getDaemonTcpPort,
-    getDaemonTcpHost: options.getDaemonTcpHost,
-    voice: options.voice,
-    serverId: options.serverId,
-    daemonVersion: options.daemonVersion,
-    daemonRuntimeConfig: options.daemonRuntimeConfig,
-    permissions: options.permissions ?? OWNER_PERMISSIONS,
-  };
-  if (options.sendToSource) sessionOptions.onMessageToSource = options.sendToSource;
-  return new Session(sessionOptions);
-}
 
 test("routes host-scoped agent skills requests through the daemon owner", async () => {
   const messages: SessionOutboundMessage[] = [];
@@ -1397,34 +1207,6 @@ describe("workspace file access (behavior preservation)", () => {
   });
 });
 
-function createStoredAgentRecord(
-  overrides: Pick<StoredAgentRecord, "id" | "cwd"> & Partial<StoredAgentRecord>,
-): StoredAgentRecord {
-  return {
-    id: overrides.id,
-    provider: overrides.provider ?? "codex",
-    cwd: overrides.cwd,
-    workspaceId: overrides.workspaceId,
-    createdAt: overrides.createdAt ?? "2026-01-01T00:00:00.000Z",
-    updatedAt: overrides.updatedAt ?? "2026-01-01T00:00:00.000Z",
-    lastUserMessageAt: overrides.lastUserMessageAt ?? null,
-    title: overrides.title ?? null,
-    labels: overrides.labels ?? {},
-    lastStatus: overrides.lastStatus ?? "idle",
-    lastModeId: overrides.lastModeId ?? null,
-    config: overrides.config ?? null,
-    runtimeInfo: overrides.runtimeInfo,
-    features: overrides.features,
-    persistence: overrides.persistence ?? null,
-    lastError: overrides.lastError,
-    requiresAttention: overrides.requiresAttention,
-    attentionReason: overrides.attentionReason,
-    attentionTimestamp: overrides.attentionTimestamp,
-    internal: overrides.internal,
-    archivedAt: overrides.archivedAt ?? null,
-  };
-}
-
 describe("plugin timeline append RPC", () => {
   test("stamps the plugin identity and returns the timeline position", async () => {
     const messages: SessionOutboundMessage[] = [];
@@ -1519,32 +1301,6 @@ describe("plugin timeline append RPC", () => {
   });
 });
 
-interface RecordedLog {
-  level: number;
-  msg: string | undefined;
-  requestType?: string;
-}
-
-function createRecordingLogger(): {
-  logger: SessionOptions["logger"];
-  records: RecordedLog[];
-} {
-  const records: RecordedLog[] = [];
-  const record = (level: number) => (details: unknown, msg?: string) => {
-    const requestType = (details as { requestType?: string } | null)?.requestType;
-    records.push({ level, msg, ...(requestType ? { requestType } : {}) });
-  };
-  const logger: SessionOptions["logger"] = asSessionLogger({
-    trace: () => {},
-    debug: () => {},
-    info: () => {},
-    warn: record(40),
-    error: record(50),
-    child: () => logger,
-  });
-  return { logger, records };
-}
-
 describe("request outcome logging", () => {
   test("logs a request outcome as a warning, not a daemon error", async () => {
     const { logger, records } = createRecordingLogger();
@@ -1569,11 +1325,13 @@ describe("request outcome logging", () => {
       input: { workspaceId: "wks_1" },
     });
 
-    expect(records).toContainEqual({
-      level: 40,
-      msg: "Request could not be answered",
-      requestType: "plugin.rpc.invoke.request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 40,
+        msg: "Request could not be answered",
+        requestType: "plugin.rpc.invoke.request",
+      }),
+    );
     expect(records.filter((record) => record.level === 50)).toEqual([]);
     expect(messages).toContainEqual(
       expect.objectContaining({
@@ -1602,11 +1360,13 @@ describe("request outcome logging", () => {
 
     await session.handleMessage({ type: "refresh_agent_request", agentId, requestId: "refresh-1" });
 
-    expect(records).toContainEqual({
-      level: 40,
-      msg: "Request could not be answered",
-      requestType: "refresh_agent_request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 40,
+        msg: "Request could not be answered",
+        requestType: "refresh_agent_request",
+      }),
+    );
     expect(records.filter((record) => record.level === 50)).toEqual([]);
     expect(messages).toContainEqual(
       expect.objectContaining({
@@ -1631,11 +1391,13 @@ describe("request outcome logging", () => {
 
     await session.handleMessage({ type: "project.list.request", requestId: "projects-1" });
 
-    expect(records).toContainEqual({
-      level: 40,
-      msg: "Request could not be answered",
-      requestType: "project.list.request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 40,
+        msg: "Request could not be answered",
+        requestType: "project.list.request",
+      }),
+    );
     expect(records.filter((record) => record.level === 50)).toEqual([]);
   });
 
@@ -1648,11 +1410,13 @@ describe("request outcome logging", () => {
 
     await session.handleMessage({ type: "project.list.request", requestId: "projects-2" });
 
-    expect(records).toContainEqual({
-      level: 50,
-      msg: "Failed to handle project.list.request",
-      requestType: "project.list.request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 50,
+        msg: "Failed to handle project.list.request",
+        requestType: "project.list.request",
+      }),
+    );
   });
 
   test("still logs an unexpected handler failure as an error", async () => {
@@ -1672,11 +1436,13 @@ describe("request outcome logging", () => {
       input: {},
     });
 
-    expect(records).toContainEqual({
-      level: 50,
-      msg: "Error handling message",
-      requestType: "plugin.rpc.invoke.request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 50,
+        msg: "Error handling message",
+        requestType: "plugin.rpc.invoke.request",
+      }),
+    );
   });
 });
 
