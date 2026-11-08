@@ -1523,6 +1523,7 @@ interface RecordedLog {
   level: number;
   msg: string | undefined;
   requestType?: string;
+  error?: string;
 }
 
 function createRecordingLogger(): {
@@ -1531,8 +1532,14 @@ function createRecordingLogger(): {
 } {
   const records: RecordedLog[] = [];
   const record = (level: number) => (details: unknown, msg?: string) => {
-    const requestType = (details as { requestType?: string } | null)?.requestType;
-    records.push({ level, msg, ...(requestType ? { requestType } : {}) });
+    const context = details as { requestType?: string; err?: unknown } | null;
+    const error = context?.err instanceof Error ? context.err.message : undefined;
+    records.push({
+      level,
+      msg,
+      ...(context?.requestType ? { requestType: context.requestType } : {}),
+      ...(error ? { error } : {}),
+    });
   };
   const logger: SessionOptions["logger"] = asSessionLogger({
     trace: () => {},
@@ -1569,11 +1576,13 @@ describe("request outcome logging", () => {
       input: { workspaceId: "wks_1" },
     });
 
-    expect(records).toContainEqual({
-      level: 40,
-      msg: "Request could not be answered",
-      requestType: "plugin.rpc.invoke.request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 40,
+        msg: "Request could not be answered",
+        requestType: "plugin.rpc.invoke.request",
+      }),
+    );
     expect(records.filter((record) => record.level === 50)).toEqual([]);
     expect(messages).toContainEqual(
       expect.objectContaining({
@@ -1602,11 +1611,13 @@ describe("request outcome logging", () => {
 
     await session.handleMessage({ type: "refresh_agent_request", agentId, requestId: "refresh-1" });
 
-    expect(records).toContainEqual({
-      level: 40,
-      msg: "Request could not be answered",
-      requestType: "refresh_agent_request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 40,
+        msg: "Request could not be answered",
+        requestType: "refresh_agent_request",
+      }),
+    );
     expect(records.filter((record) => record.level === 50)).toEqual([]);
     expect(messages).toContainEqual(
       expect.objectContaining({
@@ -1631,11 +1642,13 @@ describe("request outcome logging", () => {
 
     await session.handleMessage({ type: "project.list.request", requestId: "projects-1" });
 
-    expect(records).toContainEqual({
-      level: 40,
-      msg: "Request could not be answered",
-      requestType: "project.list.request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 40,
+        msg: "Request could not be answered",
+        requestType: "project.list.request",
+      }),
+    );
     expect(records.filter((record) => record.level === 50)).toEqual([]);
   });
 
@@ -1648,11 +1661,13 @@ describe("request outcome logging", () => {
 
     await session.handleMessage({ type: "project.list.request", requestId: "projects-2" });
 
-    expect(records).toContainEqual({
-      level: 50,
-      msg: "Failed to handle project.list.request",
-      requestType: "project.list.request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 50,
+        msg: "Failed to handle project.list.request",
+        requestType: "project.list.request",
+      }),
+    );
   });
 
   test("still logs an unexpected handler failure as an error", async () => {
@@ -1672,11 +1687,13 @@ describe("request outcome logging", () => {
       input: {},
     });
 
-    expect(records).toContainEqual({
-      level: 50,
-      msg: "Error handling message",
-      requestType: "plugin.rpc.invoke.request",
-    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 50,
+        msg: "Error handling message",
+        requestType: "plugin.rpc.invoke.request",
+      }),
+    );
   });
 });
 
@@ -1684,6 +1701,8 @@ interface HandlerOutcomeCase {
   name: string;
   message: SessionInboundMessage;
   requestType?: string;
+  /** The handler's own log message, so the error half proves which seam failed. */
+  handlerMessage: string;
   overrides: (failure: Error) => Partial<SessionForTestOptions>;
 }
 
@@ -1731,9 +1750,13 @@ function workspaceStub(failure: Error): Partial<SessionForTestOptions> {
   return { workspaceRegistry: workspaceRegistry as never };
 }
 
+// The three ensureAgentLoaded rows fail at the provider lookup, so they prove the handler's catch
+// branches by class; they do not exercise the handler's own primary call (clearAgentAttention,
+// fetchTimeline), which needs a live agent to reach.
 const handlerOutcomeCases: HandlerOutcomeCase[] = [
   {
     name: "delete_agent_request",
+    handlerMessage: "Failed to fully delete agent agent-delete",
     message: { type: "delete_agent_request", agentId: "agent-delete", requestId: "req-delete" },
     overrides: (failure) => ({
       agentStorage: {
@@ -1749,6 +1772,7 @@ const handlerOutcomeCases: HandlerOutcomeCase[] = [
   },
   {
     name: "update_agent_request",
+    handlerMessage: "session: update_agent_request error",
     message: {
       type: "update_agent_request",
       agentId: "agent-update",
@@ -1759,6 +1783,7 @@ const handlerOutcomeCases: HandlerOutcomeCase[] = [
   },
   {
     name: "project.rename.request",
+    handlerMessage: "session: project.rename.request error",
     message: {
       type: "project.rename.request",
       projectId: "project-rename",
@@ -1769,6 +1794,7 @@ const handlerOutcomeCases: HandlerOutcomeCase[] = [
   },
   {
     name: "project.remove.request",
+    handlerMessage: "session: project.remove.request error",
     requestType: "project.remove.request",
     message: {
       type: "project.remove.request",
@@ -1779,6 +1805,7 @@ const handlerOutcomeCases: HandlerOutcomeCase[] = [
   },
   {
     name: "clear_agent_attention",
+    handlerMessage: "Failed to clear agent attention",
     message: {
       type: "clear_agent_attention",
       agentId: "agent-attention",
@@ -1788,6 +1815,7 @@ const handlerOutcomeCases: HandlerOutcomeCase[] = [
   },
   {
     name: "fetch_agent_timeline_request",
+    handlerMessage: "Failed to handle fetch_agent_timeline_request",
     requestType: "fetch_agent_timeline_request",
     message: {
       type: "fetch_agent_timeline_request",
@@ -1798,12 +1826,14 @@ const handlerOutcomeCases: HandlerOutcomeCase[] = [
   },
   {
     name: "agent.fork_context.request",
+    handlerMessage: "Failed to handle agent.fork_context.request",
     requestType: "agent.fork_context.request",
     message: { type: "agent.fork_context.request", agentId: "agent-fork", requestId: "req-fork" },
     overrides: (failure) => loadFailureStub(failure, "agent-fork"),
   },
   {
     name: "archive_workspace_request",
+    handlerMessage: "Failed to archive workspace",
     requestType: "archive_workspace_request",
     message: {
       type: "archive_workspace_request",
@@ -1814,6 +1844,7 @@ const handlerOutcomeCases: HandlerOutcomeCase[] = [
   },
   {
     name: "workspace.mark_unread.request",
+    handlerMessage: "Failed to mark workspace unread",
     requestType: "workspace.mark_unread.request",
     message: {
       type: "workspace.mark_unread.request",
@@ -1836,14 +1867,14 @@ describe("request outcome logging per handler", () => {
 
       await session.handleMessage(handlerCase.message);
 
-      expect(records.filter((record) => record.level === 50)).toEqual([]);
-      expect(records).toContainEqual(
-        expect.objectContaining({
-          level: 40,
-          msg: "Request could not be answered",
-          ...(handlerCase.requestType ? { requestType: handlerCase.requestType } : {}),
-        }),
-      );
+      // One record, and it is the injected outcome — not some other failure the handler caught.
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        level: 40,
+        msg: "Request could not be answered",
+        error: "not available",
+        ...(handlerCase.requestType ? { requestType: handlerCase.requestType } : {}),
+      });
     });
 
     test(`${handlerCase.name} still logs an ordinary failure at error`, async () => {
@@ -1855,8 +1886,13 @@ describe("request outcome logging per handler", () => {
 
       await session.handleMessage(handlerCase.message);
 
-      expect(records.filter((record) => record.level === 40)).toEqual([]);
-      expect(records.some((record) => record.level === 50)).toBe(true);
+      // One record, the handler's own message, and the injected error — not a createStub TypeError.
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        level: 50,
+        msg: handlerCase.handlerMessage,
+        error: "boom",
+      });
     });
   }
 });
