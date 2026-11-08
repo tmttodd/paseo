@@ -8,6 +8,10 @@ dotenv.config({ path: path.resolve(serverRoot, ".env.test"), override: true });
 dotenv.config({ path: path.resolve(serverRoot, "../.env") });
 
 process.env.PASEO_SUPERVISED = "0";
+// Fixtures commit into throwaway repos, so they must not read the developer's
+// ~/.gitconfig: its core.hooksPath, commit.gpgsign or init.defaultBranch can fail
+// (or pass) a suite for reasons the change under test has nothing to do with.
+process.env.GIT_CONFIG_GLOBAL = path.resolve(serverRoot, "src/test-utils/test-gitconfig");
 process.env.GIT_TERMINAL_PROMPT = "0";
 process.env.GIT_SSH_COMMAND = "ssh -oBatchMode=yes";
 process.env.SSH_ASKPASS = "/usr/bin/false";

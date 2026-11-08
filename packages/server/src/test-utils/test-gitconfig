@@ -1,0 +1,19 @@
+# The global git config the test suites run under.
+#
+# Fixtures build throwaway repositories and commit into them, so they must not
+# inherit whatever the developer's ~/.gitconfig says: a core.hooksPath hook that
+# refuses commits on main, commit.gpgsign = true, or a different init.defaultBranch
+# all turn a passing suite red (or green) for reasons the change under test has
+# nothing to do with. CI runners have no such config, and this file is what makes a
+# local run match them. vitest-setup.ts points GIT_CONFIG_GLOBAL at it.
+[init]
+	defaultBranch = main
+[user]
+	name = Paseo Test
+	email = test@getpaseo.local
+[commit]
+	gpgsign = false
+[tag]
+	gpgsign = false
+[advice]
+	detachedHead = false
