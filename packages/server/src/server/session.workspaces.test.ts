@@ -107,6 +107,9 @@ async function flushWorkspaceUpdateBackgroundWork(): Promise<void> {
 }
 
 afterEach(async () => {
+  // A test that throws before its own vi.useRealTimers() would otherwise leave
+  // fake timers installed and hang flushTerminalContributionWork for every test after it.
+  vi.useRealTimers();
   while (terminalManagers.length > 0) {
     const manager = terminalManagers.pop();
     if (manager) {
@@ -9215,74 +9218,74 @@ test("workspace auto-name replaces the unchanged prompt title", async () => {
 test("workspace auto-name uses the backing root for a nested worktree", async () => {
   vi.useFakeTimers();
   const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "workspace-auto-name-rejected-")));
-  const repoDir = path.join(tempDir, "repo");
-  mkdirSync(repoDir);
-  execFileSync("git", ["init", repoDir], { stdio: "pipe" });
-  execFileSync("git", ["config", "user.email", "test@getpaseo.local"], {
-    cwd: repoDir,
-    stdio: "pipe",
-  });
-  execFileSync("git", ["config", "user.name", "Paseo Test"], { cwd: repoDir, stdio: "pipe" });
-  execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repoDir, stdio: "pipe" });
-  writeFileSync(path.join(repoDir, "README.md"), "hello\n");
-  execFileSync("git", ["add", "README.md"], { cwd: repoDir, stdio: "pipe" });
-  execFileSync("git", ["commit", "-m", "initial"], { cwd: repoDir, stdio: "pipe" });
-  execFileSync("git", ["branch", "-M", "placeholder-branch"], { cwd: repoDir, stdio: "pipe" });
-  writePaseoWorktreeMetadata(repoDir, { baseRefName: "main" });
-  writePaseoWorktreeFirstAgentBranchAutoNameMetadata(repoDir, {
-    placeholderBranchName: "placeholder-branch",
-  });
-  const workspaceCwd = path.join(repoDir, "packages", "app");
-  mkdirSync(workspaceCwd, { recursive: true });
-
-  const workspace = createPersistedWorkspaceRecord({
-    workspaceId: "ws-rejected-branch-title",
-    projectId: "proj-rejected-branch-title",
-    cwd: workspaceCwd,
-    kind: "worktree",
-    displayName: "Fix checkout title",
-    title: "Fix checkout title",
-    branch: "placeholder-branch",
-    worktreeRoot: repoDir,
-    isPaseoOwnedWorktree: true,
-    createdAt: "2026-03-01T12:00:00.000Z",
-    updatedAt: "2026-03-01T12:00:00.000Z",
-  });
-  const stored = new Map([[workspace.workspaceId, workspace]]);
-  let generateCalls = 0;
-  const gitMutations: string[] = [];
-  const emittedCwds: string[] = [];
-  const workspaceAutoName = new WorkspaceAutoName({
-    agentManager: asAgentManager({}),
-    workspaceRegistry: {
-      update: async (workspaceId, updater) => {
-        const current = stored.get(workspaceId);
-        if (!current) return null;
-        const updated = updater(current);
-        stored.set(workspaceId, updated);
-        return updated;
-      },
-    },
-    workspaceGitService: createNoopWorkspaceGitService(),
-    providerSnapshotManager: createProviderSnapshotManagerStub().manager,
-    readDaemonConfig: () => ({ metadataGeneration: { providers: [] } }),
-    gitMutation: {
-      notifyGitMutation: async (_cwd, reason) => {
-        gitMutations.push(reason);
-      },
-    },
-    emitWorkspaceUpdateForCwd: async (cwd) => {
-      emittedCwds.push(cwd);
-    },
-    emitWorkspaceUpdateForWorkspaceId: async () => {},
-    logger: asSessionLogger(createTestLogger()),
-    generateWorkspaceName: async () => {
-      generateCalls += 1;
-      return { title: "Generated Invalid Branch Title", branch: "Invalid Branch Name" };
-    },
-  });
-
   try {
+    const repoDir = path.join(tempDir, "repo");
+    mkdirSync(repoDir);
+    execFileSync("git", ["init", repoDir], { stdio: "pipe" });
+    execFileSync("git", ["config", "user.email", "test@getpaseo.local"], {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
+    execFileSync("git", ["config", "user.name", "Paseo Test"], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repoDir, stdio: "pipe" });
+    writeFileSync(path.join(repoDir, "README.md"), "hello\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["branch", "-M", "placeholder-branch"], { cwd: repoDir, stdio: "pipe" });
+    writePaseoWorktreeMetadata(repoDir, { baseRefName: "main" });
+    writePaseoWorktreeFirstAgentBranchAutoNameMetadata(repoDir, {
+      placeholderBranchName: "placeholder-branch",
+    });
+    const workspaceCwd = path.join(repoDir, "packages", "app");
+    mkdirSync(workspaceCwd, { recursive: true });
+
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId: "ws-rejected-branch-title",
+      projectId: "proj-rejected-branch-title",
+      cwd: workspaceCwd,
+      kind: "worktree",
+      displayName: "Fix checkout title",
+      title: "Fix checkout title",
+      branch: "placeholder-branch",
+      worktreeRoot: repoDir,
+      isPaseoOwnedWorktree: true,
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    });
+    const stored = new Map([[workspace.workspaceId, workspace]]);
+    let generateCalls = 0;
+    const gitMutations: string[] = [];
+    const emittedCwds: string[] = [];
+    const workspaceAutoName = new WorkspaceAutoName({
+      agentManager: asAgentManager({}),
+      workspaceRegistry: {
+        update: async (workspaceId, updater) => {
+          const current = stored.get(workspaceId);
+          if (!current) return null;
+          const updated = updater(current);
+          stored.set(workspaceId, updated);
+          return updated;
+        },
+      },
+      workspaceGitService: createNoopWorkspaceGitService(),
+      providerSnapshotManager: createProviderSnapshotManagerStub().manager,
+      readDaemonConfig: () => ({ metadataGeneration: { providers: [] } }),
+      gitMutation: {
+        notifyGitMutation: async (_cwd, reason) => {
+          gitMutations.push(reason);
+        },
+      },
+      emitWorkspaceUpdateForCwd: async (cwd) => {
+        emittedCwds.push(cwd);
+      },
+      emitWorkspaceUpdateForWorkspaceId: async () => {},
+      logger: asSessionLogger(createTestLogger()),
+      generateWorkspaceName: async () => {
+        generateCalls += 1;
+        return { title: "Generated Invalid Branch Title", branch: "Invalid Branch Name" };
+      },
+    });
+
     workspaceAutoName.scheduleForWorktree({
       workspace,
       firstAgentContext: { prompt: "Fix checkout title" },
