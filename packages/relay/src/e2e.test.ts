@@ -62,6 +62,11 @@ function spawnRelayDevServer(port: number): ChildProcess {
       String(port),
       "--live-reload=false",
       "--show-interactive-dev-session=false",
+      // Empty the wrangler.toml PASEO_RELAY_UPSTREAM var so the local dev
+      // server serves /ws itself instead of proxying to the live
+      // paseo-relay-next.fly.dev relay (DNS for it must not gate this suite).
+      "--var",
+      "PASEO_RELAY_UPSTREAM:",
     ],
     {
       cwd: relayPackageRoot,
