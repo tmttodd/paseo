@@ -1,22 +1,13 @@
-import {
-  createWorkspaceRuntimeStore,
-  type WorkspaceRuntimeStore,
-} from "./workspace-runtime-store/index.js";
-import { createAgentMessageDeliveryStub } from "./test-utils/session-stubs.js";
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import {
   createRecordingLogger,
   createSessionForTest,
   createStoredAgentRecord,
 } from "./session.test-harness.js";
-import {
-  createMessageReceiptsStub,
-  createTestCreationService,
-} from "./test-utils/session-stubs.js";
 import { execSync } from "child_process";
 import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve as resolvePath } from "path";
-import pino from "pino";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -33,12 +24,9 @@ import {
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import { Session } from "./session.js";
-import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import { StructuredAgentFallbackError } from "./agent/agent-response-loop.js";
-import type { StoredAgentRecord } from "./agent/agent-storage.js";
 import type { AgentManagerEvent } from "./agent/agent-manager.js";
-import type { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { WorkspaceLabelError, type WorkspaceLabelService } from "./workspace-labels/index.js";
 import { RequestOutcomeError } from "./request-outcome.js";
 import { createPersistedProjectRecord } from "./workspace-registry.js";
@@ -48,16 +36,7 @@ import type { SessionInboundMessage, SessionOutboundMessage } from "./messages.j
 import {
   asSessionInternals as asSessionInternalsHelper,
   asPluginRuntime,
-  asSessionLogger,
-  asAgentManager,
-  asAgentStorage,
-  asDownloadTokenStore,
   asPushNotifications,
-  asScheduleService,
-  asCheckoutDiffManager,
-  asGitHubService,
-  asWorkspaceGitService,
-  asDaemonConfigStore,
   findByType,
   createProviderSnapshot,
   createProviderSnapshotManagerStub,
@@ -67,7 +46,6 @@ import {
   GitHubAuthenticationError,
   GitHubCliMissingError,
   GitHubCommandError,
-  type GitHubService,
 } from "../services/github-service.js";
 import type { CheckDetails, ForgeService } from "../services/forge-service.js";
 import type { GitHubPullRequestStatusFacts } from "../services/github-facts.js";
