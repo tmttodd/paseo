@@ -1680,6 +1680,187 @@ describe("request outcome logging", () => {
   });
 });
 
+interface HandlerOutcomeCase {
+  name: string;
+  message: SessionInboundMessage;
+  requestType?: string;
+  overrides: (failure: Error) => Partial<SessionForTestOptions>;
+}
+
+// ensureAgentLoaded reads the record, then asks the manager for its providers: failing there reaches
+// the handler's catch without needing a live agent.
+function loadFailureStub(failure: Error, agentId: string): Partial<SessionForTestOptions> {
+  return {
+    agentStorage: {
+      get: vi.fn().mockResolvedValue({
+        agentId,
+        provider: "codex",
+        cwd: "/tmp/agent",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      } as never),
+    },
+    agentManager: {
+      getAgent: vi.fn(() => undefined),
+      getRegisteredProviderIds: vi.fn(() => {
+        throw failure;
+      }),
+      waitForAgentClose: vi.fn().mockResolvedValue(undefined),
+    },
+  };
+}
+
+function agentStub(failure: Error, method: string): Partial<SessionForTestOptions> {
+  return {
+    agentManager: {
+      getAgent: vi.fn(() => undefined),
+      // ensureAgentLoaded awaits this while unwinding a failed load.
+      waitForAgentClose: vi.fn().mockResolvedValue(undefined),
+      [method]: vi.fn().mockRejectedValue(failure),
+    },
+  };
+}
+
+function workspaceStub(failure: Error): Partial<SessionForTestOptions> {
+  const workspaceRegistry = {
+    get: vi.fn().mockRejectedValue(failure),
+    list: vi.fn().mockResolvedValue([]),
+    update: vi.fn().mockRejectedValue(failure),
+    archive: vi.fn().mockRejectedValue(failure),
+  };
+  return { workspaceRegistry: workspaceRegistry as never };
+}
+
+const handlerOutcomeCases: HandlerOutcomeCase[] = [
+  {
+    name: "delete_agent_request",
+    message: { type: "delete_agent_request", agentId: "agent-delete", requestId: "req-delete" },
+    overrides: (failure) => ({
+      agentStorage: {
+        get: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockRejectedValue(failure),
+      },
+      agentManager: {
+        getAgent: vi.fn(() => undefined),
+        closeAgent: vi.fn().mockResolvedValue(false),
+        flush: vi.fn().mockResolvedValue(undefined),
+      },
+    }),
+  },
+  {
+    name: "update_agent_request",
+    message: {
+      type: "update_agent_request",
+      agentId: "agent-update",
+      name: "renamed",
+      requestId: "req-update",
+    },
+    overrides: (failure) => agentStub(failure, "updateAgentMetadata"),
+  },
+  {
+    name: "project.rename.request",
+    message: {
+      type: "project.rename.request",
+      projectId: "project-rename",
+      customName: "Name",
+      requestId: "req-rename",
+    },
+    overrides: (failure) => ({ projectRegistry: { get: vi.fn().mockRejectedValue(failure) } }),
+  },
+  {
+    name: "project.remove.request",
+    requestType: "project.remove.request",
+    message: {
+      type: "project.remove.request",
+      projectId: "project-remove",
+      requestId: "req-remove",
+    },
+    overrides: (failure) => ({ projectRegistry: { get: vi.fn().mockRejectedValue(failure) } }),
+  },
+  {
+    name: "clear_agent_attention",
+    message: {
+      type: "clear_agent_attention",
+      agentId: "agent-attention",
+      requestId: "req-attention",
+    },
+    overrides: (failure) => loadFailureStub(failure, "agent-attention"),
+  },
+  {
+    name: "fetch_agent_timeline_request",
+    requestType: "fetch_agent_timeline_request",
+    message: {
+      type: "fetch_agent_timeline_request",
+      agentId: "agent-timeline",
+      requestId: "req-timeline",
+    },
+    overrides: (failure) => loadFailureStub(failure, "agent-timeline"),
+  },
+  {
+    name: "agent.fork_context.request",
+    requestType: "agent.fork_context.request",
+    message: { type: "agent.fork_context.request", agentId: "agent-fork", requestId: "req-fork" },
+    overrides: (failure) => loadFailureStub(failure, "agent-fork"),
+  },
+  {
+    name: "archive_workspace_request",
+    requestType: "archive_workspace_request",
+    message: {
+      type: "archive_workspace_request",
+      workspaceId: "ws-archive",
+      requestId: "req-archive",
+    },
+    overrides: (failure) => workspaceStub(failure),
+  },
+  {
+    name: "workspace.mark_unread.request",
+    requestType: "workspace.mark_unread.request",
+    message: {
+      type: "workspace.mark_unread.request",
+      workspaceId: "ws-unread",
+      requestId: "req-unread",
+    },
+    overrides: (failure) => workspaceStub(failure),
+  },
+];
+
+describe("request outcome logging per handler", () => {
+  for (const handlerCase of handlerOutcomeCases) {
+    test(`${handlerCase.name} logs a request outcome below error`, async () => {
+      const { logger, records } = createRecordingLogger();
+      const session = createSessionForTest({
+        logger,
+        messages: [],
+        ...handlerCase.overrides(new RequestOutcomeError("not available")),
+      });
+
+      await session.handleMessage(handlerCase.message);
+
+      expect(records.filter((record) => record.level === 50)).toEqual([]);
+      expect(records).toContainEqual(
+        expect.objectContaining({
+          level: 40,
+          msg: "Request could not be answered",
+          ...(handlerCase.requestType ? { requestType: handlerCase.requestType } : {}),
+        }),
+      );
+    });
+
+    test(`${handlerCase.name} still logs an ordinary failure at error`, async () => {
+      const { logger, records } = createRecordingLogger();
+      const session = createSessionForTest({
+        logger,
+        ...handlerCase.overrides(new Error("boom")),
+      });
+
+      await session.handleMessage(handlerCase.message);
+
+      expect(records.filter((record) => record.level === 40)).toEqual([]);
+      expect(records.some((record) => record.level === 50)).toBe(true);
+    });
+  }
+});
+
 describe("agent detach RPC", () => {
   test("detaches a stored subagent and emits the updated standalone agent", async () => {
     const messages: unknown[] = [];
