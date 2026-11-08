@@ -67,7 +67,12 @@ export interface SessionForTestOptions {
     getWorkspaceGitMetadata?: ReturnType<typeof vi.fn>;
     getProjectSlug?: ReturnType<typeof vi.fn>;
   };
-  workspaceRegistry?: { get: ReturnType<typeof vi.fn> };
+  workspaceRegistry?: {
+    get: ReturnType<typeof vi.fn>;
+    update?: ReturnType<typeof vi.fn>;
+    list?: ReturnType<typeof vi.fn>;
+  };
+  filesystem?: SessionOptions["filesystem"];
   projectRegistry?: Partial<SessionOptions["projectRegistry"]>;
   terminalManager?: SessionOptions["terminalManager"];
   serviceProxy?: SessionOptions["serviceProxy"];
@@ -171,6 +176,7 @@ export function createSessionForTest(options: SessionForTestOptions = {}): Sessi
     } as SessionOptions["projectRegistry"],
     // Session only reads this registry through get/list; the cast is the same boundary
     // createStub owns elsewhere, kept here so the harness itself typechecks.
+    filesystem: options.filesystem,
     workspaceRegistry: (options.workspaceRegistry ?? {
       get: vi.fn(),
       list: vi.fn().mockResolvedValue([]),
