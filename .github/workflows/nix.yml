@@ -22,8 +22,11 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
 
-      - name: Update lockfile + Nix hash if stale
-        run: ./scripts/update-nix.sh
+      # A stale committed hash used to be repaired here and nowhere recorded, so the
+      # build stayed green while nix build from a clean checkout would fail. Fail
+      # instead, and let whoever changed the lockfile run ./scripts/update-nix.sh.
+      - name: Verify the committed lockfile and Nix hash are current
+        run: ./scripts/update-nix.sh --check
 
       - name: Build Nix package
         run: nix build .#default -o result
