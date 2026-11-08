@@ -76,6 +76,9 @@ function workspaceStub(failure: Error): Partial<SessionForTestOptions> {
 }
 
 const DELETE_AGENT_ID = "agent-delete";
+// The two messages that name the agent, so the id lives in one place.
+const CANCEL_AGENT_ID = "agent-cancel";
+const REFRESH_AGENT_ID = "agent-refresh";
 
 // The three ensureAgentLoaded rows fail at the provider lookup, so they prove the handler's catch
 // branches by class; they do not exercise the handler's own primary call (clearAgentAttention,
@@ -231,10 +234,10 @@ const handlerOutcomeCases: HandlerOutcomeCase[] = [
   },
   {
     name: "cancel_agent_request",
-    handlerMessage: "Failed to cancel running agent on request for agent agent-cancel",
+    handlerMessage: `Failed to cancel running agent on request for agent ${CANCEL_AGENT_ID}`,
     message: {
       type: "cancel_agent_request",
-      agentId: "agent-cancel",
+      agentId: CANCEL_AGENT_ID,
       requestId: "req-cancel",
     },
     // requestAgentRunCancellation reads the live agent first; the catch reads it again to answer.
@@ -251,11 +254,11 @@ const handlerOutcomeCases: HandlerOutcomeCase[] = [
   },
   {
     name: "refresh_agent_request",
-    handlerMessage: "Failed to refresh agent agent-refresh",
+    handlerMessage: `Failed to refresh agent ${REFRESH_AGENT_ID}`,
     requestType: "refresh_agent_request",
     message: {
       type: "refresh_agent_request",
-      agentId: "agent-refresh",
+      agentId: REFRESH_AGENT_ID,
       requestId: "req-refresh",
     },
     // The legacy workspace-restore branch is inert without an appVersion, so unarchiveAgentState's
