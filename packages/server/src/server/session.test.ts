@@ -1380,6 +1380,85 @@ describe("request outcome logging", () => {
     );
   });
 
+  test("reports a permission failure once and still answers the caller", async () => {
+    const { logger, records } = createRecordingLogger();
+    const messages: unknown[] = [];
+    const session = createSessionForTest({
+      messages,
+      logger,
+      agentManager: {
+        respondToPermission: vi.fn().mockRejectedValue(new RequestOutcomeError("Agent is gone")),
+      },
+    });
+
+    await session.handleMessage({
+      type: "agent_permission_response",
+      agentId: "agent-1",
+      requestId: "perm-1",
+      response: { behavior: "allow" },
+    });
+
+    const logged = records.filter((record) => record.level === 40 || record.level === 50);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({
+      level: 40,
+      msg: "Request could not be answered",
+      requestType: "agent_permission_response",
+    });
+    // The answer the caller already gets is not a daemon fault, so nothing reaches level 50.
+    expect(records.filter((record) => record.level === 50)).toEqual([]);
+    expect(
+      (messages as Array<{ type: string }>).filter((message) => message.type === "activity_log"),
+    ).toHaveLength(1);
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "rpc_error",
+        payload: expect.objectContaining({ requestId: "perm-1" }),
+      }),
+    );
+  });
+
+  test("reports an ordinary permission failure once, at error", async () => {
+    const { logger, records } = createRecordingLogger();
+    const messages: unknown[] = [];
+    const session = createSessionForTest({
+      messages,
+      logger,
+      agentManager: {
+        respondToPermission: vi.fn().mockRejectedValue(new Error("permission channel closed")),
+      },
+    });
+
+    await session.handleMessage({
+      type: "agent_permission_response",
+      agentId: "agent-1",
+      requestId: "perm-2",
+      response: { behavior: "allow" },
+    });
+
+    // The handler no longer catches, so the boundary is the only reporter: one record, no
+    // second one from a handler that swallowed the failure and reported it itself.
+    const logged = records.filter((record) => record.level === 40 || record.level === 50);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({
+      level: 50,
+      msg: "Error handling message",
+      requestType: "agent_permission_response",
+    });
+    expect(
+      (messages as Array<{ type: string }>).filter((message) => message.type === "activity_log"),
+    ).toHaveLength(1);
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "rpc_error",
+        payload: expect.objectContaining({
+          requestId: "perm-2",
+          error: "Request failed: permission channel closed",
+        }),
+      }),
+    );
+  });
+
   test("logs a handler that answers its own failure below error", async () => {
     const { logger, records } = createRecordingLogger();
     const session = createSessionForTest({

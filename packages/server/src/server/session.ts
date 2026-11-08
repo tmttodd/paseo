@@ -5152,35 +5152,24 @@ export class Session {
     requestId: string,
     response: AgentPermissionResponse,
   ): Promise<void> {
-    try {
-      await respondToAgentPermission({
-        agentManager: this.agentManager,
-        agentId,
-        requestId,
-        response,
-        logger: this.sessionLogger,
+    // A failure here propagates to the request boundary, which reports it once: one log record,
+    // one rpc_error and one activity_log, instead of this handler reporting it and the boundary
+    // reporting the rethrow as well.
+    await respondToAgentPermission({
+      agentManager: this.agentManager,
+      agentId,
+      requestId,
+      response,
+      logger: this.sessionLogger,
+    });
+    // COMPAT(ownedSubscriptions): added in v0.8.0, remove after 2027-03-09.
+    // Legacy clients consume the single domain resolution; modern request outcomes
+    // are independent of whether this socket (or its logical Session) observes it.
+    if (this.delivery.isModern(this.delivery.currentSource)) {
+      this.delivery.reply({
+        type: "agent_permission_resolved",
+        payload: { agentId, requestId, resolution: response },
       });
-      // COMPAT(ownedSubscriptions): added in v0.8.0, remove after 2027-03-09.
-      // Legacy clients consume the single domain resolution; modern request outcomes
-      // are independent of whether this socket (or its logical Session) observes it.
-      if (this.delivery.isModern(this.delivery.currentSource)) {
-        this.delivery.reply({
-          type: "agent_permission_resolved",
-          payload: { agentId, requestId, resolution: response },
-        });
-      }
-    } catch (error) {
-      this.logHandlerFailure({ err: error, agentId, requestId }, "Failed to respond to permission");
-      this.emit({
-        type: "activity_log",
-        payload: {
-          id: uuidv4(),
-          timestamp: new Date(),
-          type: "error",
-          content: `Failed to respond to permission: ${getErrorMessage(error)}`,
-        },
-      });
-      throw error;
     }
   }
 
