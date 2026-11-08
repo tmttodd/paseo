@@ -79,6 +79,14 @@ export function asCheckoutDiffManager(stub: {
   return createStub<SessionOptions["checkoutDiffManager"]>(stub);
 }
 
+export function asWorkspaceAutoName(
+  stub: {
+    [K in keyof SessionOptions["workspaceAutoName"]]?: unknown;
+  } = {},
+): SessionOptions["workspaceAutoName"] {
+  return createStub<SessionOptions["workspaceAutoName"]>(stub);
+}
+
 export function asDaemonConfigStore(stub: {
   [K in keyof SessionOptions["daemonConfigStore"]]?: unknown;
 }): SessionOptions["daemonConfigStore"] {
